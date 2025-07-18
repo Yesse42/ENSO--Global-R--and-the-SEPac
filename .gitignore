@@ -1,0 +1,11 @@
+*.nc
+*.pdf
+*.png
+*.jpg
+*.csv
+*.DS_Store
+*.ipynb_checkpoints
+*.jld2
+*.txt
+*.zip
+*.grib*
