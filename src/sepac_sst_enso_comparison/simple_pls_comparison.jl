@@ -106,11 +106,8 @@ function create_single_var_comparison(lat, lon, sepac_loading, enso_loading, var
     # Add main title
     fig.suptitle("PLS Loading Comparison: $var_name", fontsize=16, y=0.95)
     
-    # Adjust layout
-    plt.tight_layout()
-    
     # Save figure
-    fig.savefig(joinpath(visdir, filename), dpi=300, bbox_inches="tight")
+    fig.savefig(joinpath(visdir, filename), dpi=300)
     plt.close(fig)
     
     println("Saved comparison plot: $filename")

@@ -140,11 +140,8 @@ function create_comparison_plot(lat, lon, sepac_loadings, enso_loadings, titles,
     # Add main title
     fig.suptitle(main_title, fontsize=16, y=0.98)
     
-    # Adjust layout
-    plt.tight_layout()
-    
     # Save figure
-    fig.savefig(joinpath(visdir, filename), dpi=300, bbox_inches="tight")
+    fig.savefig(joinpath(visdir, filename), dpi=300)
     plt.close(fig)
     
     println("Saved comparison plot: $filename")
