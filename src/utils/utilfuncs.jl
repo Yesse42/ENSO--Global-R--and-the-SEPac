@@ -126,3 +126,20 @@ function filter_time_period(data, times, time_period, t_idx)
 end
 
 calc_float_time(date_time) = year(date_time) + (month(date_time) - 1) / 12
+
+function time_lag(data, lag)
+    lag = -lag
+    T = eltype(data)
+    lagged_data = convert(Vector{Union{T, Missing}}, data)
+    if lag == 0
+        lagged_data
+    elseif lag > 0
+        @views lagged_data[lag+1:end] .= data[1:end-lag]
+        lagged_data[1:lag] .= missing
+        lagged_data
+    elseif lag < 0
+        @views lagged_data[1:end+lag] .= data[-lag+1:end]
+        lagged_data[end+lag+1:end] .= missing
+        lagged_data
+    end
+end

@@ -204,9 +204,4 @@ close(ds_out)
 
 println("Successfully saved deflated data to $output_file")
 
-# Note: PLS model saving function not available in local implementation
-# pls_output_file = joinpath(output_dir, "era5_ceres_enso_deflated_pls_model.nc")
-# write_pls_regressor_to_netcdf(my_pls, pls_output_file)
-# println("Saved PLS model to $pls_output_file")
-
 println("ENSO deflation analysis complete!")

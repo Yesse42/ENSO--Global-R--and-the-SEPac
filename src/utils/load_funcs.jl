@@ -6,7 +6,13 @@ using NCDatasets, Dates, CSV, DataFrames, Dictionaries
 function load_era5_variable(varname, idx_tuple, datasets; throw_error_on_missing = true)
     for ds in datasets
         if haskey(ds, varname)
-            return Array{Float32}(ds[varname][idx_tuple...])
+            outarr =  ds[varname][idx_tuple...]
+            if !any(ismissing(el) for el in outarr)
+                return Array{Float32}(outarr)
+            else
+                @warn "Variable $varname contains missing values in dataset"
+                return outarr
+            end
         end
     end
     throw_error_on_missing && error("Variable $varname not found in any of the datasets")
@@ -316,6 +322,81 @@ function load_enso_data(time_period;
     
     set!(coords, "time", filtered_time)
     
+    return loaded_data, coords
+end
+
+"""
+    load_sepac_sst_index(time_period; data_dir="../../data/SEPac_SST", filename="sepac_sst_index.csv", lags=nothing)
+
+Load SEPac SST index data for a specified time period and lag values.
+
+# Arguments
+- `time_period`: Tuple of (start_date, end_date) as Date objects
+- `data_dir`: Directory containing the SEPac SST index CSV file
+- `filename`: SEPac SST index data CSV filename
+- `lags`: Vector of lag values (e.g., [-2, -1, 0, 1, 2]) or nothing to load all available lags
+
+# Returns
+Dictionary with SEPac SST index and its lags as keys and corresponding values as arrays.
+Also returns coordinates dictionary with time array.
+
+# Examples
+```julia
+# Load specific lags
+sepac_sst_data, coords = load_sepac_sst_index(time_period; lags=[0, 1, 2])
+
+# Load all available lags
+sepac_sst_data, coords = load_sepac_sst_index(time_period; lags=nothing)
+
+# Load single lag (backward compatibility)
+sepac_sst_data, coords = load_sepac_sst_index(time_period; lags=[0])
+```
+"""
+function load_sepac_sst_index(time_period; data_dir="../../data/SEPac_SST", filename="sepac_sst_index.csv", lags=nothing)
+    sepac_path = joinpath(data_dir, filename)
+
+    if !isfile(sepac_path)
+        error("SEPac SST index file not found: $sepac_path")
+    end
+
+    # Load the CSV data
+    sepac_df = CSV.read(sepac_path, DataFrame)
+
+    # Convert dates
+    sepac_time = Date.(sepac_df[:, :Date])
+
+    # Filter by time period
+    valid_times = in_time_period.(sepac_time, Ref(time_period))
+    filtered_time = sepac_time[valid_times]
+
+    # Determine which columns to load
+    if lags === nothing
+        # Load all available lag columns
+        all_columns = names(sepac_df)
+        lag_columns = filter(col -> startswith(string(col), "SEPac_SST_Index"), all_columns)
+        index_columns = string.(lag_columns)
+    else
+        # Load specific lag columns - handle negative numbers properly
+        index_columns = ["SEPac_SST_Index_Lag$lag" for lag in lags]
+    end
+
+    # Return as Dictionary and coordinates
+    loaded_data = Dictionary()
+    coords = Dictionary()
+
+    # Load all requested index columns
+    for index_col in index_columns
+        if index_col in string.(names(sepac_df))
+            sepac_index = sepac_df[!, Symbol(index_col)]
+            filtered_index = sepac_index[valid_times]
+            set!(loaded_data, index_col, filtered_index)
+        else
+            @warn "SEPac SST column $index_col not found in data file"
+        end
+    end
+
+    set!(coords, "time", filtered_time)
+
     return loaded_data, coords
 end
 
