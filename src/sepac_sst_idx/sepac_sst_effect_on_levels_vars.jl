@@ -39,7 +39,7 @@ single_vars_era = ["u10", "v10"]
 single_vars_ceres = ["toa_net_all_mon", "gridded_net_sw", "toa_lw_all_mon"]
 
 # Define SEPac SST Index lags to analyze
-sepac_lags = [-6, -3, 0, 3, 6]
+sepac_lags = [-12, -6, -3, 0, 3, 6, 12]
 sepac_lag_names = ["SEPac_SST_Index_Lag$lag" for lag in sepac_lags]
 
 #Load the SEPac SST Index data
@@ -142,9 +142,9 @@ for (stacked_var_name, stacked_level_var) in zip(stacked_var_names, stacked_leve
             push!(all_corr_subtitles, "$level - SEPac SST lag $(sepac_lags[i])")
         end
     end
-    
-    # Create one large plot with all correlations (5 lags × 5 levels = 25 subplots)
-    layout = (length(sepac_lags), length(level_names))  # 5 rows (lags) × 5 columns (levels)
+
+    # Create one large plot with all correlations (5 lags × 7 levels = 35 subplots)
+    layout = (length(level_names), length(sepac_lags))  # 5 rows (lags) × 7 columns (levels)
     
     # Debug: Check data types
     println("Number of slices: ", length(all_corr_slices))
