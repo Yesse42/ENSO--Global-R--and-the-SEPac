@@ -1,4 +1,4 @@
-using Plots, Statistics, StatsBase, Dates
+using Plots, Statistics, StatsBase, Dates, NCDatasets
 using LinearAlgebra
 
 # Include necessary modules
@@ -15,6 +15,7 @@ cd(olddir)
     preprocess_data(data, time_points)
 
 Detrend and deseasonalize time series data using existing utility functions.
+Note: ENSO deflated data may already be processed, but we apply standard preprocessing for consistency.
 """
 function preprocess_data(data, time_points)
     # Make a copy to avoid modifying the original
@@ -31,12 +32,49 @@ function preprocess_data(data, time_points)
 end
 
 """
-    analyze_sepac_radiation_effects()
+    load_enso_deflated_radiation_data(time_period)
 
-Analyze the correlation between SEPac SST index at different lags (-6, -3, 0, 3, 6) and CERES radiation data.
+Load ENSO deflated radiation data from the NetCDF file.
+"""
+function load_enso_deflated_radiation_data(time_period)
+    datapath = "../../data/ENSO_Deflated/era5_ceres_enso_deflated.nc"
+    
+    # Define ENSO deflated CERES radiation variables
+    enso_deflated_vars = ["deflated_gtoa_net_all_mon", "deflated_gtoa_sw_all_mon", "deflated_gtoa_lw_all_mon"]
+    
+    # Load data
+    dataset = NCDataset(datapath, "r")
+    
+    # Load time coordinates
+    times_raw = dataset["time"][:]
+    times = Date.(times_raw)
+    
+    # Filter to time period
+    time_mask = (times .>= time_period[1]) .& (times .<= time_period[2])
+    filtered_times = times[time_mask]
+    
+    # Load radiation data
+    radiation_data = Dict{String, Vector{Float64}}()
+    for var in enso_deflated_vars
+        data_full = dataset[var][:]
+        radiation_data[var] = data_full[time_mask]
+    end
+    
+    close(dataset)
+    
+    # Create coordinates dictionary
+    coords = Dict("time" => filtered_times)
+    
+    return radiation_data, coords
+end
+
+"""
+    analyze_sepac_enso_deflated_radiation_effects()
+
+Analyze the correlation between SEPac SST index at different lags (-6, -3, 0, 3, 6) and ENSO deflated CERES radiation data.
 Performs 1-component PLS regression and creates visualization plots.
 """
-function analyze_sepac_radiation_effects()
+function analyze_sepac_enso_deflated_radiation_effects()
     # Use time period defined in constants.jl
     # time_period is already defined as (Date(2000, 3), Date(2022, 4))
     
@@ -44,28 +82,27 @@ function analyze_sepac_radiation_effects()
     sepac_lags = [-6, -3, 0, 3, 6]
     sepac_columns = ["SEPac_SST_Index_Lag$lag" for lag in sepac_lags]
     
-    # Define CERES radiation variables
-    ceres_vars = ["gtoa_net_all_mon", "global_net_sw", "gtoa_lw_all_mon"]
-    radiation_labels = ["Net Radiation", "SW Radiation", "LW Radiation"]
-    radiation_short_labels = ["net", "sw", "lw"]
+    # Define ENSO deflated CERES radiation variables
+    enso_deflated_vars = ["deflated_gtoa_net_all_mon", "deflated_gtoa_sw_all_mon", "deflated_gtoa_lw_all_mon"]
+    radiation_labels = ["ENSO Deflated Net Radiation", "ENSO Deflated SW Radiation", "ENSO Deflated LW Radiation"]
+    radiation_short_labels = ["deflated_net", "deflated_sw", "deflated_lw"]
     
     println("Loading SEPac SST index data...")
     # Load SEPac SST index data
     sepac_data, sepac_coords = load_sepac_sst_index(time_period; lags=sepac_lags)
     
-    println("Loading CERES data...")
-    # Load CERES global radiation data
-    ceres_data, ceres_coords = load_ceres_data(ceres_vars, time_period)
+    println("Loading ENSO deflated CERES data...")
+    # Load ENSO deflated CERES radiation data
+    deflated_data, deflated_coords = load_enso_deflated_radiation_data(time_period)
     
     # Check data availability
     println("SEPac SST data keys: ", keys(sepac_data))
-    println("CERES data keys: ", keys(ceres_data))
+    println("ENSO deflated data keys: ", keys(deflated_data))
     println("SEPac SST time length: ", length(sepac_coords["time"]))
-    println("CERES time length: ", length(ceres_coords["time"]))
+    println("ENSO deflated time length: ", length(deflated_coords["time"]))
     
-    # Both datasets should already be filtered to the same time period
-    # Use CERES times as reference since they align with the time period
-    time_points = Date.(ceres_coords["time"])
+    # Use deflated data times as reference
+    time_points = deflated_coords["time"]
     
     println("Time points for analysis: ", length(time_points))
     
@@ -73,11 +110,11 @@ function analyze_sepac_radiation_effects()
     plots_list = []
     pls_weights_results = Dict{String, Vector{Float64}}()
     
-    for (rad_idx, (rad_var, rad_label, rad_short)) in enumerate(zip(ceres_vars, radiation_labels, radiation_short_labels))
+    for (rad_idx, (rad_var, rad_label, rad_short)) in enumerate(zip(enso_deflated_vars, radiation_labels, radiation_short_labels))
         println("Processing $rad_label...")
         
         # Extract and preprocess radiation data
-        radiation_data = ceres_data[rad_var]
+        radiation_data = deflated_data[rad_var]
         radiation_processed = preprocess_data(radiation_data, time_points)
         
         # Create subplot layout (2 rows, 3 columns for 5 lags + PLS)
@@ -164,63 +201,13 @@ function analyze_sepac_radiation_effects()
     return plots_list, pls_weights_results
 end
 
-# Run the analysis
-println("Starting SEPac SST Index-Radiation analysis...")
-plots_list, pls_weights = analyze_sepac_radiation_effects()
-
-# Create vis directory path and subdirectory for these plots
-vis_dir = joinpath(@__DIR__, "../../vis/sepac_radiation_effects/")
-sepac_plots_dir = joinpath(vis_dir, "global_rad")
-
-# Create the subdirectory if it doesn't exist
-if !isdir(sepac_plots_dir)
-    mkpath(sepac_plots_dir)
-end
-
-# Display plots
-for (i, p) in enumerate(plots_list)
-    display(p)
-    
-    # Save plots in dedicated subdirectory
-    radiation_names = ["net", "sw", "lw"]
-    output_path = joinpath(sepac_plots_dir, "sepac_$(radiation_names[i])_radiation_analysis.png")
-    savefig(p, output_path)
-    println("Saved plot for $(radiation_names[i]) radiation to: $output_path")
-end
-
-# Save PLS X weights to text file
-weights_file_path = joinpath(sepac_plots_dir, "pls_x_weights.txt")
-open(weights_file_path, "w") do file
-    println(file, "PLS X-Weights for SEPac SST Index-Radiation Analysis")
-    println(file, "=" ^ 60)
-    println(file, "Time period: $(time_period[1]) to $(time_period[2])")
-    println(file, "SEPac SST Index Lags analyzed: -6, -3, 0, 3, 6 months")
-    println(file, "Component: 1 (first PLS component)")
-    println(file, "")
-    
-    for (rad_type, weights) in pls_weights
-        println(file, "$(rad_type):")
-        println(file, "  SEPac SST Lag -6: $(round(weights[1], digits=4))")
-        println(file, "  SEPac SST Lag -3: $(round(weights[2], digits=4))")
-        println(file, "  SEPac SST Lag  0: $(round(weights[3], digits=4))")
-        println(file, "  SEPac SST Lag  3: $(round(weights[4], digits=4))")
-        println(file, "  SEPac SST Lag  6: $(round(weights[5], digits=4))")
-        println(file, "")
-    end
-    
-    println(file, "Note: X-weights indicate the relative importance and direction")
-    println(file, "of each SEPac SST Index lag in the PLS component for predicting radiation.")
-end
-
-println("Saved PLS X-weights to: $weights_file_path")
-
 """
-    plot_sepac_radiation_correlation_vs_lag()
+    plot_sepac_enso_deflated_radiation_correlation_vs_lag()
 
-Plot correlation between SEPac SST index at different lags and each radiation variable on a single axis.
+Plot correlation between SEPac SST index at different lags and each ENSO deflated radiation variable on a single axis.
 """
-function plot_sepac_radiation_correlation_vs_lag()
-    println("Calculating SEPac SST-Radiation correlations across lag range...")
+function plot_sepac_enso_deflated_radiation_correlation_vs_lag()
+    println("Calculating SEPac SST-ENSO Deflated Radiation correlations across lag range...")
     
     # Define extended lag range for SEPac SST
     extended_lags = collect(-24:24)
@@ -229,19 +216,23 @@ function plot_sepac_radiation_correlation_vs_lag()
     # Load SEPac SST data with extended lags
     sepac_data_extended, _ = load_sepac_sst_index(time_period; lags=extended_lags)
     
-    # Load CERES data
-    ceres_data, ceres_coords = load_ceres_data(ceres_vars, time_period)
-    time_points = Date.(ceres_coords["time"])
+    # Load ENSO deflated radiation data
+    deflated_data, deflated_coords = load_enso_deflated_radiation_data(time_period)
+    time_points = deflated_coords["time"]
+    
+    # Define ENSO deflated variables and labels
+    enso_deflated_vars = ["deflated_gtoa_net_all_mon", "deflated_gtoa_sw_all_mon", "deflated_gtoa_lw_all_mon"]
+    radiation_labels = ["ENSO Deflated Net Radiation", "ENSO Deflated SW Radiation", "ENSO Deflated LW Radiation"]
     
     # Initialize correlation storage
-    correlations_matrix = zeros(length(extended_lags), length(ceres_vars))
+    correlations_matrix = zeros(length(extended_lags), length(enso_deflated_vars))
     
     # Calculate correlations for each radiation variable and SEPac SST lag
-    for (rad_idx, rad_var) in enumerate(ceres_vars)
+    for (rad_idx, rad_var) in enumerate(enso_deflated_vars)
         println("Processing $(radiation_labels[rad_idx])...")
         
         # Extract and preprocess radiation data
-        radiation_data = ceres_data[rad_var]
+        radiation_data = deflated_data[rad_var]
         radiation_processed = preprocess_data(radiation_data, time_points)
         
         for (lag_idx, (lag, sepac_col)) in enumerate(zip(extended_lags, sepac_extended_columns))
@@ -265,7 +256,7 @@ function plot_sepac_radiation_correlation_vs_lag()
     colors = [:blue, :red, :green]
     line_styles = [:solid, :dash, :dot]
     
-    for (rad_idx, (rad_label, rad_short)) in enumerate(zip(radiation_labels, radiation_short_labels))
+    for (rad_idx, rad_label) in enumerate(radiation_labels)
         plot!(p, extended_lags, correlations_matrix[:, rad_idx],
               label=rad_label,
               color=colors[rad_idx],
@@ -277,8 +268,8 @@ function plot_sepac_radiation_correlation_vs_lag()
     
     # Add formatting
     plot!(p, xlabel="SEPac SST Index Lag (months)",
-          ylabel="Correlation with Radiation",
-          title="SEPac SST Index-Radiation Correlations vs Lag",
+          ylabel="Correlation with ENSO Deflated Radiation",
+          title="SEPac SST Index - ENSO Deflated Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
           xlims=(-25, 25))
@@ -289,13 +280,68 @@ function plot_sepac_radiation_correlation_vs_lag()
     return p
 end
 
-# Create and save the SEPac-Radiation correlation vs lag plot
-sepac_radiation_correlation_plot = plot_sepac_radiation_correlation_vs_lag()
-display(sepac_radiation_correlation_plot)
+# Run the analysis
+println("Starting SEPac SST Index - ENSO Deflated Radiation analysis...")
+plots_list, pls_weights = analyze_sepac_enso_deflated_radiation_effects()
+
+# Create vis directory path and subdirectory for these plots
+vis_dir = joinpath(@__DIR__, "../../vis/sepac_radiation_effects/")
+enso_deflated_plots_dir = joinpath(vis_dir, "enso_deflated_vars/global_rad")
+
+# Create the subdirectory if it doesn't exist
+if !isdir(enso_deflated_plots_dir)
+    mkpath(enso_deflated_plots_dir)
+end
+
+# Display plots
+for (i, p) in enumerate(plots_list)
+    display(p)
+    
+    # Save plots in dedicated subdirectory
+    radiation_names = ["deflated_net", "deflated_sw", "deflated_lw"]
+    output_path = joinpath(enso_deflated_plots_dir, "sepac_$(radiation_names[i])_enso_deflated_radiation_analysis.png")
+    savefig(p, output_path)
+    println("Saved plot for $(radiation_names[i]) radiation to: $output_path")
+end
+
+# Save PLS X weights to text file
+weights_file_path = joinpath(enso_deflated_plots_dir, "pls_x_weights_enso_deflated.txt")
+open(weights_file_path, "w") do file
+    println(file, "PLS X-Weights for SEPac SST Index - ENSO Deflated Radiation Analysis")
+    println(file, "=" ^ 70)
+    println(file, "Time period: $(time_period[1]) to $(time_period[2])")
+    println(file, "SEPac SST Index Lags analyzed: -6, -3, 0, 3, 6 months")
+    println(file, "Component: 1 (first PLS component)")
+    println(file, "")
+    println(file, "Note: This analysis uses ENSO deflated radiation data where")
+    println(file, "the effect of ONI (ENSO) has been regressed out, allowing us")
+    println(file, "to isolate the direct effects of SEPac SST variability on radiation.")
+    println(file, "")
+    
+    for (rad_type, weights) in pls_weights
+        println(file, "$(rad_type):")
+        println(file, "  SEPac SST Lag -6: $(round(weights[1], digits=4))")
+        println(file, "  SEPac SST Lag -3: $(round(weights[2], digits=4))")
+        println(file, "  SEPac SST Lag  0: $(round(weights[3], digits=4))")
+        println(file, "  SEPac SST Lag  3: $(round(weights[4], digits=4))")
+        println(file, "  SEPac SST Lag  6: $(round(weights[5], digits=4))")
+        println(file, "")
+    end
+    
+    println(file, "X-weights indicate the relative importance and direction")
+    println(file, "of each SEPac SST Index lag in the PLS component for predicting")
+    println(file, "ENSO deflated radiation.")
+end
+
+println("Saved PLS X-weights to: $weights_file_path")
+
+# Create and save the SEPac-ENSO Deflated Radiation correlation vs lag plot
+sepac_deflated_radiation_correlation_plot = plot_sepac_enso_deflated_radiation_correlation_vs_lag()
+display(sepac_deflated_radiation_correlation_plot)
 
 # Save the plot
-sepac_radiation_correlation_plot_path = joinpath(sepac_plots_dir, "sepac_radiation_correlation_vs_lag.png")
-savefig(sepac_radiation_correlation_plot, sepac_radiation_correlation_plot_path)
-println("Saved SEPac-Radiation correlation vs lag plot to: $sepac_radiation_correlation_plot_path")
+sepac_deflated_correlation_plot_path = joinpath(enso_deflated_plots_dir, "sepac_enso_deflated_radiation_correlation_vs_lag.png")
+savefig(sepac_deflated_radiation_correlation_plot, sepac_deflated_correlation_plot_path)
+println("Saved SEPac-ENSO Deflated Radiation correlation vs lag plot to: $sepac_deflated_correlation_plot_path")
 
 println("Analysis complete!")

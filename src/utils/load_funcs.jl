@@ -401,6 +401,75 @@ function load_sepac_sst_index(time_period; data_dir="../../data/SEPac_SST", file
 end
 
 """
+    load_eli_data(time_period; data_dir="../../data/ENSO", filename="eli_data.csv", lags=nothing, date_column="Date")
+
+Load ELI (ENSO Longitude Index) data for specified time period and lag values.
+
+# Arguments
+- `time_period`: Tuple of (start_date, end_date) as Date objects
+- `data_dir`: Directory containing ELI CSV file
+- `filename`: ELI data CSV filename
+- `lags`: Vector of lag values (e.g., [-6, -3, 0, 3, 6]) or nothing to load all available lags
+- `date_column`: Name of column containing dates
+
+# Returns
+Dictionary with ELI lag column names as keys and ELI index values as arrays.
+Also returns coordinates dictionary with time array.
+"""
+function load_eli_data(time_period; 
+                      data_dir="../../data/ENSO", 
+                      filename="eli_data.csv", 
+                      lags=nothing, 
+                      date_column="Date")
+    
+    eli_path = joinpath(data_dir, filename)
+    
+    if !isfile(eli_path)
+        error("ELI data file not found: $eli_path")
+    end
+    
+    # Load the CSV data
+    eli_df = CSV.read(eli_path, DataFrame)
+    
+    # Convert dates and add day offset for monthly data
+    eli_time = DateTime.(eli_df[!, Symbol(date_column)] .+ Day(14))
+    
+    # Filter by time period
+    valid_times = in_time_period.(eli_time, Ref(time_period))
+    filtered_time = eli_time[valid_times]
+    
+    # Determine which columns to load
+    if lags === nothing
+        # Load all available lag columns
+        all_columns = names(eli_df)
+        lag_columns = filter(col -> startswith(string(col), "ELI_Lag"), all_columns)
+        index_columns = string.(lag_columns)
+    else
+        # Load specific lag columns - handle negative numbers properly
+        index_columns = ["ELI_Lag$lag" for lag in lags]
+    end
+    
+    # Return as Dictionary and coordinates
+    loaded_data = Dictionary()
+    coords = Dictionary()
+    
+    # Load all requested index columns
+    for index_col in index_columns
+        if index_col in string.(names(eli_df))
+            eli_index = eli_df[!, Symbol(index_col)]
+            filtered_index = eli_index[valid_times]
+            set!(loaded_data, index_col, filtered_index)
+        else
+            @warn "ELI column $index_col not found in data file"
+        end
+    end
+    
+    set!(coords, "time", filtered_time)
+    
+    return loaded_data, coords
+end
+
+"""
     reshape_and_concatenate(arrays, array_names, time_indices)
 
 Reshape arrays to (time, other_dims) and concatenate along the second dimension.

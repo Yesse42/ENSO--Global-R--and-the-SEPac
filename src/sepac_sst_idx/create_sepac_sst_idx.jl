@@ -109,7 +109,7 @@ fig_idx = plot(df.Date, epac_sst_idx, label = "SEPac SST Index", xlabel = "Date"
 savefig(fig_idx, joinpath(visdir, "sepac_sst_index_timeseries.png"))
 vis && display(fig_idx)
 
-time_lags = -12:12
+time_lags = -24:24  # in months
 for lag in time_lags
     df[!, Symbol("SEPac_SST_Index_Lag$(lag)")] = time_lag(epac_sst_idx, lag)
 end

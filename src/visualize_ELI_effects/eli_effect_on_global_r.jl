@@ -1,5 +1,6 @@
 using Plots, Statistics, StatsBase, Dates
 using LinearAlgebra
+using CSV, DataFrames, Dictionaries
 
 # Include necessary modules
 olddir = pwd()
@@ -38,32 +39,32 @@ radiation_short_labels = ["net", "sw", "lw"]
 pls_lags = -24:24  # Extended range for PLS analysis
 
 """
-    analyze_enso_radiation_effects()
+    analyze_eli_radiation_effects()
 
-Analyze the correlation between ONI at different lags (-6, -3, 0, 3, 6) and CERES radiation data.
+Analyze the correlation between ELI at different lags (-6, -3, 0, 3, 6) and CERES radiation data.
 Performs 1-component PLS regression and creates visualization plots.
 """
-function analyze_enso_radiation_effects()
+function analyze_eli_radiation_effects()
     # Use time period defined in constants.jl
     # time_period is already defined as (Date(2000, 3), Date(2022, 4))
     
-    # Define ONI lags to analyze
-    oni_lags = [-6, -3, 0, 3, 6]  # in months
-    oni_columns = ["oni_lag_$(lag)" for lag in oni_lags]
+    # Define ELI lags to analyze
+    eli_lags = [-6, -3, 0, 3, 6]  # in months
+    eli_columns = ["ELI_Lag$lag" for lag in eli_lags]
     
     
-    println("Loading ENSO data...")
-    # Load ENSO data
-    enso_data, enso_coords = load_enso_data(time_period; lags=oni_lags)
+    println("Loading ELI data...")
+    # Load ELI data
+    eli_data, eli_coords = load_eli_data(time_period; lags=eli_lags)
     
     println("Loading CERES data...")
     # Load CERES global radiation data
     ceres_data, ceres_coords = load_ceres_data(ceres_vars, time_period)
     
     # Check data availability
-    println("ENSO data keys: ", keys(enso_data))
+    println("ELI data keys: ", keys(eli_data))
     println("CERES data keys: ", keys(ceres_data))
-    println("ENSO time length: ", length(enso_coords["time"]))
+    println("ELI time length: ", length(eli_coords["time"]))
     println("CERES time length: ", length(ceres_coords["time"]))
     
     # Both datasets should already be filtered to the same time period
@@ -83,31 +84,29 @@ function analyze_enso_radiation_effects()
         radiation_data = ceres_data[rad_var]
         radiation_processed = preprocess_data(radiation_data, time_points)
         
-        # Create subplot layout (2 rows, 5 columns for 9 lags + PLS)
-        subplot_layout = (2, cld(length(oni_lags), 2))
+        # Create subplot layout (2 rows, 5 columns for 5 lags + PLS)
+        subplot_layout = (2, cld(length(eli_lags) + 1, 2))
         p = plot(layout=subplot_layout, size=(1200, 800))
-        plot!(p, plot_title="$rad_label: ONI Lag Correlations and PLS Analysis", 
+        plot!(p, plot_title="$rad_label: ELI Lag Correlations and PLS Analysis", 
               plot_titlefontsize=16)
         
-        # Store correlations and ONI data for PLS
+        # Store correlations and ELI data for PLS
         correlations = Float64[]
         
         # Calculate correlations for each lag
-        for (lag_idx, (lag, oni_col)) in enumerate(zip(oni_lags, oni_columns))
-            if haskey(enso_data, oni_col)
-                # Extract and preprocess ONI data
-                oni_data_raw = enso_data[oni_col]
-                oni_processed = preprocess_data(oni_data_raw, time_points)
+        for (lag_idx, (lag, eli_col)) in enumerate(zip(eli_lags, eli_columns))
+            if haskey(eli_data, eli_col)
+                # Extract and preprocess ELI data
+                eli_data_raw = eli_data[eli_col]
+                eli_processed = preprocess_data(eli_data_raw, time_points)
                 
                 # Calculate correlation
-                corr_val = cor(oni_processed, radiation_processed)
+                corr_val = cor(eli_processed, radiation_processed)
                 push!(correlations, corr_val)
                 
-                # Store for PLS
-                
-                # Create time series plot - both ONI and radiation on same axis
-                plot!(p[lag_idx], time_points, oni_processed,
-                      label="ONI Lag $lag", color=:blue, linewidth=2,
+                # Create time series plot - both ELI and radiation on same axis
+                plot!(p[lag_idx], time_points, eli_processed,
+                      label="ELI Lag $lag", color=:blue, linewidth=2,
                       xlabel="Time", 
                       ylabel="Standardized Values",
                       title="Lag $lag (r=$(round(corr_val, digits=3)))")
@@ -124,11 +123,11 @@ function analyze_enso_radiation_effects()
         # Perform 1-component PLS regression
         println("Performing PLS regression for $rad_label...")
 
-        pls_oni_data, _ = load_enso_data(time_period; lags = pls_lags)
-        oni_matrix = hcat([pls_oni_data["oni_lag_$(lag)"] for lag in pls_lags]...)
+        pls_eli_data, _ = load_eli_data(time_period; lags = collect(pls_lags))
+        eli_matrix = hcat([pls_eli_data["ELI_Lag$lag"] for lag in pls_lags]...)
         
         # Use all data for PLS
-        X_pls = oni_matrix
+        X_pls = eli_matrix
         Y_pls = radiation_processed
         
         # Fit PLS model with 1 component
@@ -146,7 +145,7 @@ function analyze_enso_radiation_effects()
             # Calculate and display correlation for PLS
             pls_corr = cor(x_scores, Y_pls)
 
-            pls_plot = p[length(oni_lags) + 1]  # PLS plot at the end
+            pls_plot = p[length(eli_lags) + 1]  # PLS plot at the end
 
             # Plot X-scores and radiation as time series - both on same axis
             norm_factor = std(Y_pls)/std(x_scores)
@@ -172,16 +171,16 @@ function analyze_enso_radiation_effects()
 end
 
 # Run the analysis
-println("Starting ENSO-Radiation analysis...")
-plots_list, pls_weights = analyze_enso_radiation_effects()
+println("Starting ELI-Radiation analysis...")
+plots_list, pls_weights = analyze_eli_radiation_effects()
 
 # Create vis directory path and subdirectory for these plots
-vis_dir = joinpath(@__DIR__, "../../vis/enso_radiation_effects/")
-enso_plots_dir = joinpath(vis_dir, "global_rad")
+vis_dir = joinpath(@__DIR__, "../../vis/eli_radiation_effects/")
+eli_plots_dir = joinpath(vis_dir, "global_rad")
 
 # Create the subdirectory if it doesn't exist
-if !isdir(enso_plots_dir)
-    mkpath(enso_plots_dir)
+if !isdir(eli_plots_dir)
+    mkpath(eli_plots_dir)
 end
 
 # Display plots
@@ -190,33 +189,33 @@ for (i, p) in enumerate(plots_list)
     
     # Save plots in dedicated subdirectory
     radiation_names = ["net", "sw", "lw"]
-    output_path = joinpath(enso_plots_dir, "enso_$(radiation_names[i])_radiation_analysis.png")
+    output_path = joinpath(eli_plots_dir, "eli_$(radiation_names[i])_radiation_analysis.png")
     savefig(p, output_path)
     println("Saved plot for $(radiation_names[i]) radiation to: $output_path")
 end
 
 # Save PLS X weights to text file
-weights_file_path = joinpath(enso_plots_dir, "pls_x_weights.txt")
+weights_file_path = joinpath(eli_plots_dir, "pls_x_weights.txt")
 open(weights_file_path, "w") do file
-    println(file, "PLS X-Weights for ENSO-Radiation Analysis")
+    println(file, "PLS X-Weights for ELI-Radiation Analysis")
     println(file, "=" ^ 50)
     println(file, "Time period: $(time_period[1]) to $(time_period[2])")
-    println(file, "ONI Lags analyzed: -6, -3, 0, 3, 6 months")
+    println(file, "ELI Lags analyzed: -6, -3, 0, 3, 6 months")
     println(file, "Component: 1 (first PLS component)")
     println(file, "")
     
     for (rad_type, weights) in pls_weights
         println(file, "$(rad_type):")
-        println(file, "  ONI Lag -6: $(round(weights[1], digits=4))")
-        println(file, "  ONI Lag -3: $(round(weights[2], digits=4))")
-        println(file, "  ONI Lag  0: $(round(weights[3], digits=4))")
-        println(file, "  ONI Lag  3: $(round(weights[4], digits=4))")
-        println(file, "  ONI Lag  6: $(round(weights[5], digits=4))")
+        println(file, "  ELI Lag -6: $(round(weights[1], digits=4))")
+        println(file, "  ELI Lag -3: $(round(weights[2], digits=4))")
+        println(file, "  ELI Lag  0: $(round(weights[3], digits=4))")
+        println(file, "  ELI Lag  3: $(round(weights[4], digits=4))")
+        println(file, "  ELI Lag  6: $(round(weights[5], digits=4))")
         println(file, "")
     end
     
     println(file, "Note: X-weights indicate the relative importance and direction")
-    println(file, "of each ONI lag in the PLS component for predicting radiation.")
+    println(file, "of each ELI lag in the PLS component for predicting radiation.")
 end
 
 println("Saved PLS X-weights to: $weights_file_path")
@@ -226,17 +225,17 @@ println("Analysis complete!")
 """
     plot_correlation_vs_lag()
 
-Plot correlation between ONI at different lags and each radiation variable on a single axis.
+Plot correlation between ELI at different lags and each radiation variable on a single axis.
 """
 function plot_correlation_vs_lag()
     println("Calculating correlations across lag range...")
     
     # Define extended lag range
     extended_lags = collect(-24:24)
-    oni_extended_columns = ["oni_lag_$(lag)" for lag in extended_lags]
+    eli_extended_columns = ["ELI_Lag$lag" for lag in extended_lags]
     
-    # Load ENSO data with extended lags
-    enso_data_extended, _ = load_enso_data(time_period; lags=extended_lags)
+    # Load ELI data with extended lags
+    eli_data_extended, _ = load_eli_data(time_period; lags=extended_lags)
     
     # Load CERES data
     ceres_data, ceres_coords = load_ceres_data(ceres_vars, time_period)
@@ -253,14 +252,14 @@ function plot_correlation_vs_lag()
         radiation_data = ceres_data[rad_var]
         radiation_processed = preprocess_data(radiation_data, time_points)
         
-        for (lag_idx, (lag, oni_col)) in enumerate(zip(extended_lags, oni_extended_columns))
-            if haskey(enso_data_extended, oni_col)
-                # Extract and preprocess ONI data
-                oni_data_raw = enso_data_extended[oni_col]
-                oni_processed = preprocess_data(oni_data_raw, time_points)
+        for (lag_idx, (lag, eli_col)) in enumerate(zip(extended_lags, eli_extended_columns))
+            if haskey(eli_data_extended, eli_col)
+                # Extract and preprocess ELI data
+                eli_data_raw = eli_data_extended[eli_col]
+                eli_processed = preprocess_data(eli_data_raw, time_points)
                 
                 # Calculate correlation
-                corr_val = cor(oni_processed, radiation_processed)
+                corr_val = cor(eli_processed, radiation_processed)
                 correlations_matrix[lag_idx, rad_idx] = corr_val
             else
                 correlations_matrix[lag_idx, rad_idx] = NaN
@@ -285,9 +284,9 @@ function plot_correlation_vs_lag()
     end
     
     # Add formatting
-    plot!(p, xlabel="ONI Lag (months)",
-          ylabel="Correlation with ONI",
-          title="ONI-Radiation Correlations vs Lag",
+    plot!(p, xlabel="ELI Lag (months)",
+          ylabel="Correlation with ELI",
+          title="ELI-Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
           xlims=(-25, 25))
@@ -303,6 +302,6 @@ correlation_plot = plot_correlation_vs_lag()
 display(correlation_plot)
 
 # Save the plot
-correlation_plot_path = joinpath(enso_plots_dir, "oni_radiation_correlation_vs_lag.png")
+correlation_plot_path = joinpath(eli_plots_dir, "eli_radiation_correlation_vs_lag.png")
 savefig(correlation_plot, correlation_plot_path)
 println("Saved correlation vs lag plot to: $correlation_plot_path")
