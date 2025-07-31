@@ -17,6 +17,8 @@ function least_squares_fit(x, y)
     return (;slope = sol[1], intercept = sol[2])
 end
 
+get_lsq_slope(x, y) = least_squares_fit(x, y).slope
+
 function detrend!(slice, times, slope, intercept)
     @. slice -= (slope * times + intercept)
     return slice
