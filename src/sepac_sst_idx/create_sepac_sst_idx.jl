@@ -22,9 +22,9 @@ end
 
 savedir = "../../data/SEPac_SST/"
 
-vis = false
+vis = true
 
-idx_time_period = (Date(1980), Date(2024, 12, 31))
+idx_time_period = (Date(0), Date(10000000, 12, 31))
 
 PLSdir = "../../data/PLSs/"
 
@@ -39,18 +39,54 @@ coords = atmospheric_pls_data["coordinates"]
 lat = coords["latitude"]
 lon = coords["longitude"]
 
-relevant_var = "t2m"
+#Now load in the ERA5 data for SST and the CERES data for net global radiation
+relevant_var = "sst"
+era5data, era5coords = load_era5_data([relevant_var], idx_time_period)
+sst_data = era5data[relevant_var]
 
-coeff_matrix = make_matrix_to_multiply_by_X_to_get_Y(atmospheric_pls; components = 1:5)
-coeff_dict = reconstruct_spatial_arrays(coeff_matrix, atmospheric_idxs, atmospheric_shapes)
-temp_coeff_arr = coeff_dict[relevant_var]
+ceres_var = "gtoa_net_all_mon"
+ceres_rad, ceres_coords = load_ceres_data([ceres_var], idx_time_period)
+ceres_rad = ceres_rad[ceres_var]
+ceres_time = ceres_coords["time"]
+ceres_time = floor.(ceres_time, Month(1))
+ceres_valid_time = in_time_period.(ceres_time, Ref(time_period))
 
-fig_coeff = plot_global_heatmap(lat, lon, temp_coeff_arr; title = "PLS Coefficients for $relevant_var", colorbar_label = "Coefficient")
-fig_coeff.savefig(joinpath(visdir, "pls_coefficients_$relevant_var.png"))
-vis && display(fig_coeff)
-plt.close(fig_coeff)
+ceres_rad = ceres_rad[ceres_valid_time]
+ceres_time = ceres_time[ceres_valid_time]
 
-thresh = 3e-6
+era5_time_mask = in_time_period.(era5coords["time"], Ref(time_period))
+sst = sst_data[:, :, era5_time_mask]
+era5_times = era5coords["time"][era5_time_mask]
+
+#Now detrend and deseasonalize the SST data and rad data
+println("Detrending and deseasonalizing data...")
+
+# Prepare time information for detrending and deseasonalizing
+months = month.(era5_times)
+float_times = calc_float_time.(era5_times)
+month_groups = groupfind(months)
+
+# Detrend and deseasonalize SST data
+for i in 1:size(sst, 1), j in 1:size(sst, 2)
+    slice = view(sst, i, j, :)
+    if !any(ismissing, slice)
+        detrend_and_deseasonalize_precalculated_groups!(slice, float_times, month_groups)
+    end
+end
+
+# Detrend and deseasonalize radiation data
+detrend_and_deseasonalize_precalculated_groups!(ceres_rad, float_times, month_groups)
+
+#Now calculate the correlation between SST and global radiation
+temp_coeff_arr = cor.(eachslice(sst, dims = (1,2,)), Ref(ceres_rad))
+temp_coeff_arr[ismissing.(temp_coeff_arr)] .= 0.0  # Replace missing values with 0.0
+
+fig_temp_coeff = plot_global_heatmap(lat, lon, Float64.(temp_coeff_arr); title = "$relevant_var-Global Radiation Correlation", colorbar_label = "Correlation")
+fig_temp_coeff.savefig(joinpath(visdir, "$(relevant_var)_global_radiation_correlation.png"))
+vis && display(fig_temp_coeff)
+plt.close(fig_temp_coeff)
+
+thresh = 0.15
 temp_coeff_mask = Float64.(temp_coeff_arr .> thresh)
 fig_coeff_mask = plot_global_heatmap(lat, lon, temp_coeff_mask; title = "PLS Coefficient Mask for $relevant_var", colorbar_label = "Mask")
 fig_coeff_mask.savefig(joinpath(visdir, "pls_coefficient_mask_$relevant_var.png"))

@@ -214,6 +214,10 @@ end
 
 println("Saved PLS X-weights to: $weights_file_path")
 
+ceres_vars = ["gtoa_net_all_mon", "global_net_sw", "gtoa_lw_all_mon"]
+radiation_labels = ["Net Radiation", "SW Radiation", "LW Radiation"]
+radiation_short_labels = ["net", "sw", "lw"]
+
 """
     plot_sepac_radiation_correlation_vs_lag()
 
