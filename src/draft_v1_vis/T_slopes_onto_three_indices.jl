@@ -10,7 +10,7 @@ include("../utils/plot_global.jl")
 
 """
 This script will:
-Visualize the correlation between three time series from the ENSO-SEPac analysis
+Visualize the regression slopes between three time series from the ENSO-SEPac analysis
 and gridded temperature data at the surface and on pressure levels.
 
 The three time series are:
@@ -19,7 +19,7 @@ The three time series are:
 3. SEPac SST Residual (after removing ONI influence)
 
 Each row of the plot will be a different pressure level.
-Each column will show correlations with a different time series.
+Each column will show regression slopes with a different time series.
 """
 
 # Set up output directory
@@ -36,8 +36,8 @@ stacked_level_vars = ["t2m", "t"]  # surface temperature and pressure level temp
 time_series_names = ["sepac_sst_index", "oni_at_optimal_lag", "sepac_sst_residual"]
 time_series_labels = ["SEPac SST Index", "ONI at Optimal Lag", "SEPac SST Residual"]
 
-function analyze_temperature_correlations()
-    println("Starting temperature correlation analysis...")
+function analyze_temperature_regression_slopes()
+    println("Starting temperature regression slope analysis...")
     
     # Use standard time period from constants.jl
     println("Using standard time period: $(time_period[1]) to $(time_period[2])")
@@ -106,46 +106,54 @@ function analyze_temperature_correlations()
     
     # Note: The CSV time series are already preprocessed, so we don't need to detrend them again
     
-    # Calculate correlations for each time series and each level
-    println("Calculating correlations...")
+    # Calculate regression slopes for each time series and each level
+    println("Calculating regression slopes...")
     lat = Float64.(era5_coords["latitude"])
     lon = Float64.(era5_coords["longitude"])
     
-    all_corr_slices = []
-    all_corr_subtitles = []
+    all_slope_slices = []
+    all_slope_subtitles = []
     
     # Loop through time series (columns) first, then levels (rows) for column-major ordering
     for (ts_idx, ts_name) in enumerate(time_series_names)
         for (level_idx, level_name) in enumerate(level_names)
             ts_data = time_series_data[ts_name]
             
-            # Calculate correlations for this level
+            # Calculate regression slopes for this level
             level_temp_data = vertical_concat_data[:, :, level_idx, :]
-            simple_corrs = cor.(eachslice(level_temp_data, dims=(1,2)), Ref(ts_data))
-            simple_corrs = Float64.(simple_corrs)  # Ensure Float64 type
             
-            push!(all_corr_slices, simple_corrs)
-            push!(all_corr_subtitles, "$(level_name) - $(time_series_labels[ts_idx])")
+            # Calculate slopes using least_squares_fit from utilfuncs
+            slopes = zeros(Float64, size(level_temp_data)[1:2])
+            for i in 1:size(level_temp_data, 1)
+                for j in 1:size(level_temp_data, 2)
+                    temp_series = level_temp_data[i, j, :]
+                    fit_result = least_squares_fit(ts_data, temp_series)
+                    slopes[i, j] = fit_result.slope
+                end
+            end
+            
+            push!(all_slope_slices, slopes)
+            push!(all_slope_subtitles, "$(level_name) - $(time_series_labels[ts_idx])")
         end
     end
     
     # Create the plot layout: rows = levels, columns = time series
     layout = (length(level_names), length(time_series_names))  # 5 rows × 3 columns
     
-    println("Creating correlation plot...")
+    println("Creating regression slope plot...")
     println("Layout: $(layout[1]) rows (levels) × $(layout[2]) columns (time series)")
-    println("Number of subplots: $(length(all_corr_slices))")
+    println("Number of subplots: $(length(all_slope_slices))")
     
-    # Create the comprehensive correlation plot
-    corr_fig = plot_multiple_levels(lat, lon, all_corr_slices, layout;
-                                   subtitles=all_corr_subtitles,
-                                   colorbar_label="Correlation Coefficient")
+    # Create the comprehensive regression slope plot
+    slope_fig = plot_multiple_levels(lat, lon, all_slope_slices, layout;
+                                    subtitles=all_slope_subtitles,
+                                    colorbar_label="Regression Slope (K/unit)")
     
     # Save the plot
-    plot_filename = joinpath(visdir, "temperature_correlations_with_three_indices.png")
-    corr_fig.suptitle("Temperature Correlations: Levels (rows) × Time Series (columns)", fontsize=16)
-    corr_fig.savefig(plot_filename, dpi=300, bbox_inches="tight")
-    plt.close(corr_fig)
+    plot_filename = joinpath(visdir, "temperature_regression_slopes_with_three_indices.png")
+    slope_fig.suptitle("Temperature Regression Slopes: Levels (rows) × Time Series (columns)", fontsize=16)
+    slope_fig.savefig(plot_filename, dpi=300, bbox_inches="tight")
+    plt.close(slope_fig)
     
     println("Plot saved to: $plot_filename")
     
@@ -160,11 +168,12 @@ function analyze_temperature_correlations()
     end
     println("Temperature levels analyzed: $(join(level_names, ", "))")
     println("Plot layout: $(layout[1]) levels × $(layout[2]) time series")
+    println("Regression slopes show temperature change (K) per unit change in time series")
     
-    return corr_fig, time_series_data, aligned_times
+    return slope_fig, time_series_data, aligned_times
 end
 
 # Run the analysis
-println("Starting Temperature Correlation Analysis")
+println("Starting Temperature Regression Slope Analysis")
 println("="^60)
-analyze_temperature_correlations()
+analyze_temperature_regression_slopes()

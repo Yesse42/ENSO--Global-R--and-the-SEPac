@@ -125,7 +125,7 @@ function plot_correlation_matrix()
     # Extract radiation data and preprocess (detrend and deseasonalize)
     net_rad = ceres_data["gtoa_net_all_mon"]
     sw_rad = ceres_data["gtoa_sw_all_mon"] 
-    lw_rad = ceres_data["gtoa_lw_all_mon"]
+    lw_rad = -1 .* ceres_data["gtoa_lw_all_mon"]
     ceres_time = ceres_coords["time"]
     
     println("Loaded radiation data: $(length(net_rad)) points from $(minimum(ceres_time)) to $(maximum(ceres_time))")
@@ -334,6 +334,7 @@ function plot_correlation_matrix()
 end
 
 # Run the analysis
-if abspath(PROGRAM_FILE) == @__FILE__
+if true
+    cd(@__DIR__)
     plot_correlation_matrix()
 end

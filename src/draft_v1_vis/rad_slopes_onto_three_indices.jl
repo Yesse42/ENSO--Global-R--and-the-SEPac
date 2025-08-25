@@ -10,7 +10,7 @@ include("../utils/plot_global.jl")
 
 """
 This script will:
-Visualize the correlation between three time series from the ENSO-SEPac analysis
+Visualize the regression slopes between three time series from the ENSO-SEPac analysis
 and gridded radiation data (net, SW, and LW).
 
 The three time series are:
@@ -19,7 +19,7 @@ The three time series are:
 3. SEPac SST Residual (after removing ONI influence)
 
 Each row of the plot will be a different radiation type.
-Each column will show correlations with a different time series.
+Each column will show regression slopes with a different time series.
 """
 
 # Set up output directory
@@ -36,8 +36,8 @@ radiation_labels = ["Net Radiation", "SW Radiation", "LW Radiation"]
 time_series_names = ["sepac_sst_index", "oni_at_optimal_lag", "sepac_sst_residual"]
 time_series_labels = ["SEPac SST Index", "ONI at Optimal Lag", "SEPac SST Residual"]
 
-function analyze_radiation_correlations()
-    println("Starting radiation correlation analysis...")
+function analyze_radiation_regression_slopes()
+    println("Starting radiation regression slope analysis...")
     
     # Use standard time period from constants.jl
     println("Using standard time period: $(time_period[1]) to $(time_period[2])")
@@ -74,13 +74,13 @@ function analyze_radiation_correlations()
     println("CERES data period: $(minimum(ceres_times)) to $(maximum(ceres_times))")
     println("Number of CERES time points: $(length(ceres_times))")
     
-    # Prepare for correlation calculations
+    # Prepare for regression slope calculations
     println("Preprocessing CERES radiation data...")
     float_times = @. year(ceres_times) + (month(ceres_times) - 1) / 12
     month_groups = groupfind(month.(ceres_times))
     
-    all_corr_slices = []
-    all_corr_subtitles = []
+    all_slope_slices = []
+    all_slope_subtitles = []
     
     # First, collect all valid radiation variables for processing
     valid_rad_vars = []
@@ -118,25 +118,31 @@ function analyze_radiation_correlations()
         push!(valid_rad_data, rad_data_processed)
     end
     
-    # Check if we have any valid correlations to plot
+    # Check if we have any valid regression slopes to plot
     if isempty(valid_rad_vars)
-        error("No gridded radiation data found for spatial correlation analysis")
+        error("No gridded radiation data found for spatial regression analysis")
     end
     
-    # Now calculate correlations in column-major order (time series first, then radiation types)
+    # Now calculate regression slopes in column-major order (time series first, then radiation types)
     for (ts_idx, ts_name) in enumerate(time_series_names)
-        println("Calculating correlations with $(time_series_labels[ts_idx])...")
+        println("Calculating regression slopes with $(time_series_labels[ts_idx])...")
         ts_data = time_series_data[ts_name]
         
         for (rad_idx, (rad_var, rad_label, rad_data_processed)) in enumerate(zip(valid_rad_vars, valid_rad_labels, valid_rad_data))
             println("  Processing $(rad_label)...")
             
-            # Calculate spatial correlations
-            simple_corrs = cor.(eachslice(rad_data_processed, dims=(1,2)), Ref(ts_data))
-            simple_corrs = Float64.(simple_corrs)  # Ensure Float64 type
+            # Calculate spatial regression slopes
+            slopes = zeros(Float64, size(rad_data_processed)[1:2])
+            for i in 1:size(rad_data_processed, 1)
+                for j in 1:size(rad_data_processed, 2)
+                    rad_series = rad_data_processed[i, j, :]
+                    fit_result = least_squares_fit(ts_data, rad_series)
+                    slopes[i, j] = fit_result.slope
+                end
+            end
             
-            push!(all_corr_slices, simple_corrs)
-            push!(all_corr_subtitles, "$(rad_label) - $(time_series_labels[ts_idx])")
+            push!(all_slope_slices, slopes)
+            push!(all_slope_subtitles, "$(rad_label) - $(time_series_labels[ts_idx])")
         end
     end
     
@@ -145,24 +151,24 @@ function analyze_radiation_correlations()
     n_time_series = length(time_series_names)
     layout = (n_valid_radiation_vars, n_time_series)  # rows × columns
     
-    println("Creating correlation plot...")
+    println("Creating regression slope plot...")
     println("Layout: $(layout[1]) rows (radiation types) × $(layout[2]) columns (time series)")
-    println("Number of subplots: $(length(all_corr_slices))")
+    println("Number of subplots: $(length(all_slope_slices))")
     
     # Get coordinate information for plotting
     lat = Float64.(ceres_coords["latitude"])
     lon = Float64.(ceres_coords["longitude"])
     
-    # Create the comprehensive correlation plot
-    corr_fig = plot_multiple_levels(lat, lon, all_corr_slices, layout;
-                                   subtitles=all_corr_subtitles,
-                                   colorbar_label="Correlation Coefficient")
+    # Create the comprehensive regression slope plot
+    slope_fig = plot_multiple_levels(lat, lon, all_slope_slices, layout;
+                                    subtitles=all_slope_subtitles,
+                                    colorbar_label="Regression Slope (W/m²/unit)")
     
     # Save the plot
-    plot_filename = joinpath(visdir, "radiation_correlations_with_three_indices.png")
-    corr_fig.suptitle("Radiation Correlations: Radiation Types (rows) × Time Series (columns)", fontsize=16)
-    corr_fig.savefig(plot_filename, dpi=300, bbox_inches="tight")
-    plt.close(corr_fig)
+    plot_filename = joinpath(visdir, "radiation_regression_slopes_with_three_indices.png")
+    slope_fig.suptitle("Radiation Regression Slopes: Radiation Types (rows) × Time Series (columns)", fontsize=16)
+    slope_fig.savefig(plot_filename, dpi=300, bbox_inches="tight")
+    plt.close(slope_fig)
     
     println("Plot saved to: $plot_filename")
     
@@ -176,20 +182,16 @@ function analyze_radiation_correlations()
         println("  $i. $label: mean = $(round(mean(data), digits=3)), std = $(round(std(data), digits=3))")
     end
     println("Radiation variables analyzed:")
-    for (i, (var, label)) in enumerate(zip(radiation_vars, radiation_labels))
-        rad_data = ceres_data[var]
-        if ndims(rad_data) > 1
-            println("  $i. $label ($var): gridded data $(size(rad_data))")
-        else
-            println("  $i. $label ($var): global time series (length $(length(rad_data)))")
-        end
+    for (i, (var, label)) in enumerate(zip(valid_rad_vars, valid_rad_labels))
+        println("  $i. $label ($var): gridded data")
     end
     println("Plot layout: $(layout[1]) radiation types × $(layout[2]) time series")
+    println("Regression slopes show radiation change (W/m²) per unit change in time series")
     
-    return corr_fig, time_series_data, ceres_times
+    return slope_fig, time_series_data, ceres_times
 end
 
 # Run the analysis
-println("Starting Radiation Correlation Analysis")
+println("Starting Radiation Regression Slope Analysis")
 println("="^60)
-analyze_radiation_correlations()
+analyze_radiation_regression_slopes()
