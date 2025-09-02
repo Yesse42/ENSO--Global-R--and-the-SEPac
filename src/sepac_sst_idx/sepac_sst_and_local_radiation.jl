@@ -1,7 +1,8 @@
 """
-This script plots the correlation between net rad, sw rad, and lw rad, and the 3 time series 
+This script plots the correlation between local SEPac net rad, sw rad, and lw rad, and the 3 time series 
 (sepac_sst_index, oni_at_optimal_lag, sepac_sst_residual) from the ENSO-SEPac correlation 
 results as a function of lags from -24 to 24 months.
+Uses local SEPac radiation data instead of global mean CERES data.
 """
 
 using Plots, Statistics, StatsBase, Dates, DataFrames, CSV
@@ -117,21 +118,20 @@ function plot_correlation_matrix()
     sepac_residual = enso_sepac_df.sepac_sst_residual
     time_points = enso_sepac_df.Date
     
-    # Load CERES radiation data for the standard time period
-    println("Loading CERES radiation data...")
-    ceres_variables = ["gtoa_net_all_mon", "global_net_sw", "gtoa_lw_all_mon"]
-    ceres_data, ceres_coords = load_ceres_data(ceres_variables, time_period)
+    # Load CERES local SEPac radiation data for the standard time period
+    println("Loading local SEPac CERES radiation data...")
+    ceres_data = CSV.read("/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/SEPac_SST/sepac_ceres_flux_time_series.csv", DataFrame)
     
     # Extract radiation data and preprocess (detrend and deseasonalize)
-    net_rad = ceres_data["gtoa_net_all_mon"]
-    sw_rad = ceres_data["global_net_sw"] 
-    lw_rad = -1 .* ceres_data["gtoa_lw_all_mon"]
-    ceres_time = ceres_coords["time"]
+    net_rad = ceres_data[!,"SEPac_Net_Radiation"]
+    sw_rad = ceres_data[!,"SEPac_Net_SW"] 
+    lw_rad = ceres_data[!,"SEPac_Minus_LW"]
+    ceres_time = ceres_data[!,"Date"]
     
-    println("Loaded radiation data: $(length(net_rad)) points from $(minimum(ceres_time)) to $(maximum(ceres_time))")
+    println("Loaded local SEPac radiation data: $(length(net_rad)) points from $(minimum(ceres_time)) to $(maximum(ceres_time))")
     
     # Preprocess radiation data (detrend and deseasonalize)
-    println("Preprocessing radiation data (detrend and deseasonalize)...")
+    println("Preprocessing local SEPac radiation data (detrend and deseasonalize)...")
     net_rad_processed = preprocess_data(net_rad, ceres_time)
     sw_rad_processed = preprocess_data(sw_rad, ceres_time)
     lw_rad_processed = preprocess_data(lw_rad, ceres_time)
@@ -192,7 +192,7 @@ function plot_correlation_matrix()
     # Define plot styling
     colors = [:blue, :red, :green]
     line_styles = [:solid, :dash, :dot]
-    radiation_labels = ["Net Radiation", "SW Radiation", "LW Radiation"]
+    radiation_labels = ["Local Net Radiation", "Local SW Radiation", "Local LW Radiation"]
     
     # Plot 1: SEPac SST Index vs all radiation types
     p1 = plot(size=(800, 600), dpi=300)
@@ -218,8 +218,8 @@ function plot_correlation_matrix()
           marker=:circle,
           markersize=3)
     plot!(p1, xlabel="SEPac SST Index Lag (months)",
-          ylabel="Correlation with Radiation",
-          title="SEPac SST Index-Radiation Correlations vs Lag",
+          ylabel="Correlation with Local Radiation",
+          title="SEPac SST Index-Local Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
           xlims=(-25, 25))
@@ -249,8 +249,8 @@ function plot_correlation_matrix()
           marker=:circle,
           markersize=3)
     plot!(p2, xlabel="ONI (optimal lag) Lag (months)",
-          ylabel="Correlation with Radiation",
-          title="ONI (optimal lag)-Radiation Correlations vs Lag",
+          ylabel="Correlation with Local Radiation",
+          title="ONI (optimal lag)-Local Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
           xlims=(-25, 25))
@@ -280,8 +280,8 @@ function plot_correlation_matrix()
           marker=:circle,
           markersize=3)
     plot!(p3, xlabel="SEPac SST Residual Lag (months)",
-          ylabel="Correlation with Radiation",
-          title="SEPac SST Residual-Radiation Correlations vs Lag",
+          ylabel="Correlation with Local Radiation",
+          title="SEPac SST Residual-Local Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
           xlims=(-25, 25))
@@ -291,9 +291,9 @@ function plot_correlation_matrix()
     combined_plot = plot(p1, p2, p3, layout=(3,1), size=(800, 1400))
     
     # Save plot
-    output_dir = "../../vis/draft_v1_vis"
+    output_dir = "../../vis/sepac_sst_local_rad_effects"
     mkpath(output_dir)
-    plot_filename = joinpath(output_dir, "radiation_enso_sepac_lagged_correlations.png")
+    plot_filename = joinpath(output_dir, "local_radiation_enso_sepac_lagged_correlations.png")
     savefig(combined_plot, plot_filename)
     println("Plot saved to: $plot_filename")
     
@@ -305,8 +305,8 @@ function plot_correlation_matrix()
     println("Lag range: $(minimum(lag_range)) to $(maximum(lag_range)) months")
     
     # Find maximum correlations for each radiation type
-    println("\nMaximum absolute correlations:")
-    println("Net Radiation:")
+    println("\nMaximum absolute correlations (Local SEPac Radiation):")
+    println("Local Net Radiation:")
     max_net_sepac_idx = argmax(abs.(skipmissing(corr_net_sepac)))
     max_net_oni_idx = argmax(abs.(skipmissing(corr_net_oni)))
     max_net_residual_idx = argmax(abs.(skipmissing(corr_net_residual)))
@@ -314,7 +314,7 @@ function plot_correlation_matrix()
     println("  vs ONI: $(round(corr_net_oni[max_net_oni_idx], digits=3)) at lag $(lag_range[max_net_oni_idx])")
     println("  vs SEPac Residual: $(round(corr_net_residual[max_net_residual_idx], digits=3)) at lag $(lag_range[max_net_residual_idx])")
     
-    println("SW Radiation:")
+    println("Local SW Radiation:")
     max_sw_sepac_idx = argmax(abs.(skipmissing(corr_sw_sepac)))
     max_sw_oni_idx = argmax(abs.(skipmissing(corr_sw_oni)))
     max_sw_residual_idx = argmax(abs.(skipmissing(corr_sw_residual)))
@@ -322,7 +322,7 @@ function plot_correlation_matrix()
     println("  vs ONI: $(round(corr_sw_oni[max_sw_oni_idx], digits=3)) at lag $(lag_range[max_sw_oni_idx])")
     println("  vs SEPac Residual: $(round(corr_sw_residual[max_sw_residual_idx], digits=3)) at lag $(lag_range[max_sw_residual_idx])")
     
-    println("LW Radiation:")
+    println("Local LW Radiation:")
     max_lw_sepac_idx = argmax(abs.(skipmissing(corr_lw_sepac)))
     max_lw_oni_idx = argmax(abs.(skipmissing(corr_lw_oni)))
     max_lw_residual_idx = argmax(abs.(skipmissing(corr_lw_residual)))

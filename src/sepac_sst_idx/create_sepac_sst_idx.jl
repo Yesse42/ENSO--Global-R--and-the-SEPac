@@ -153,3 +153,12 @@ end
 display(df)
 
 CSV.write(joinpath(savedir, "sepac_sst_index.csv"), df)
+
+# Save mask, weights, and coordinates to JLD2 file
+jldsave(joinpath(savedir, "sepac_sst_mask_and_weights.jld2");
+    final_mask = Float32.(final_mask),
+    bool_mask = Float32.(bool_mask),
+    area_weights = Float32.(area_weights),
+    latitude = Float32.(lat),
+    longitude = Float32.(lon)
+)
