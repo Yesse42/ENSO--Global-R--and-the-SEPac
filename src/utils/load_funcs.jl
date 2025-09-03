@@ -139,7 +139,7 @@ Also returns coordinate information.
 function load_ceres_data(variables, time_period; 
                         data_dir="../../data/CERES", 
                         global_file="ceres_global.nc", 
-                        gridded_file="ceres_gridded.nc")
+                        gridded_file="ceres_gridded.nc", lw_sign_flip = false)
     
     global_path = joinpath(data_dir, global_file)
     gridded_path = joinpath(data_dir, gridded_file)
@@ -240,7 +240,16 @@ function load_ceres_data(variables, time_period;
             @warn "Variable $var not found in CERES data files"
         end
     end
-    
+
+    #If the variable is lw, multiply it by -1 if lw_sign_flip is true
+    if lw_sign_flip
+        for (var, data) in loaded_data
+            if occursin("lw", var)
+                loaded_data[var] .*= -1
+            end
+        end
+    end
+
     return loaded_data, coords
 end
 

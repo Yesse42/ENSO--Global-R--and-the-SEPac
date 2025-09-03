@@ -222,7 +222,8 @@ function plot_correlation_matrix()
           title="SEPac SST Index-Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
-          xlims=(-25, 25))
+          xlims=(-25, 25),
+          ylims=(-1, 1))
     hline!(p1, [0], color=:black, linestyle=:dashdot, alpha=0.5, label="")
     
     # Plot 2: ONI at optimal lag vs all radiation types  
@@ -253,7 +254,8 @@ function plot_correlation_matrix()
           title="ONI (optimal lag)-Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
-          xlims=(-25, 25))
+          xlims=(-25, 25),
+          ylims=(-1, 1))
     hline!(p2, [0], color=:black, linestyle=:dashdot, alpha=0.5, label="")
     
     # Plot 3: SEPac SST Residual vs all radiation types
@@ -284,7 +286,8 @@ function plot_correlation_matrix()
           title="SEPac SST Residual-Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
-          xlims=(-25, 25))
+          xlims=(-25, 25),
+          ylims=(-1, 1))
     hline!(p3, [0], color=:black, linestyle=:dashdot, alpha=0.5, label="")
     
     # Combine plots vertically

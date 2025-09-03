@@ -285,7 +285,8 @@ function plot_sepac_radiation_correlation_vs_lag()
           title="SEPac SST Index-Radiation Correlations vs Lag",
           grid=true,
           legend=:topright,
-          xlims=(-25, 25))
+          xlims=(-25, 25),
+          ylims=(-0.5, 0.5))
     
     # Add zero line for reference
     hline!(p, [0], color=:black, linestyle=:dashdot, alpha=0.5, label="")

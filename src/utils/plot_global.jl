@@ -76,3 +76,30 @@ function plot_multiple_levels(lat, lon, data_slices, layout; subtitles, colorbar
     plt.colorbar(cm.ScalarMappable(norm=colornorm, cmap=cmap), ax=axs, orientation="horizontal", label=colorbar_label)
     return fig
 end
+
+function plot_polygon_on_ax!(ax, lonlat_points; color="red", alpha=0.5, linewidth=1, linestyle="-", facecolor=nothing, edgecolor=nothing, kwargs...)
+    # Extract longitude and latitude arrays
+    lons = [point[1] for point in lonlat_points]
+    lats = [point[2] for point in lonlat_points]
+    
+    # Close the polygon by adding the first point at the end if not already closed
+    if lons[1] != lons[end] || lats[1] != lats[end]
+        push!(lons, lons[1])
+        push!(lats, lats[1])
+    end
+    
+    # Set default colors if not provided
+    if isnothing(facecolor)
+        facecolor = color
+    end
+    if isnothing(edgecolor)
+        edgecolor = color
+    end
+    
+    # Plot the polygon
+    ax.fill(lons, lats, transform=ccrs.PlateCarree(), 
+           facecolor=facecolor, edgecolor=edgecolor, alpha=alpha, 
+           linewidth=linewidth, linestyle=linestyle; kwargs...)
+    
+    return ax
+end
