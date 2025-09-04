@@ -253,6 +253,12 @@ function load_ceres_data(variables, time_period;
     return loaded_data, coords
 end
 
+load_new_ceres_data(variables, time_period) = load_ceres_data(variables, time_period; 
+                                             data_dir="/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/CERES/NEW", 
+                                             global_file="ceres_global.nc", 
+                                             gridded_file="ceres_gridded.nc", 
+                                             lw_sign_flip = false)
+
 """
     load_enso_data(time_period; data_dir="../../data/ENSO", filename="enso_data.csv", lags=nothing, date_column="date")
 
