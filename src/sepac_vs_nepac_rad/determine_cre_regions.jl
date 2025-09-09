@@ -7,7 +7,6 @@ using GMT, JLD2, Interpolations
 cd(@__DIR__)
 include("../utils/plot_global.jl")
 include("../utils/load_funcs.jl")
-include("../utils/plot_global.jl")
 
 """
     is_in_lonlat_bounds(lon_point, lat_point, lon_min, lon_max, lat_min, lat_max)
@@ -80,6 +79,45 @@ function create_bbox_mask(lon_grid, lat_grid, lon_min, lon_max, lat_min, lat_max
     return mask
 end
 
+"""
+    haversine_distance(lat1, lon1, lat2, lon2)
+
+Calculate the great-circle distance between two points on Earth using the Haversine formula.
+
+# Arguments
+- `lat1`, `lon1`: Latitude and longitude of first point (in degrees)
+- `lat2`, `lon2`: Latitude and longitude of second point (in degrees)
+
+# Returns
+- Angular distance in radians between the two points
+"""
+function haversine_distance(lon1, lat1, lon2, lat2)
+    # Convert degrees to radians
+    φ1 = deg2rad(lat1)
+    φ2 = deg2rad(lat2)
+    Δφ = deg2rad(lat2 - lat1)
+    Δλ = deg2rad(lon2 - lon1)
+    
+    # Haversine formula
+    a = sin(Δφ/2)^2 + cos(φ1) * cos(φ2) * sin(Δλ/2)^2
+    a = clamp(a, 0, 1)  # Ensure a is within [0, 1] to avoid domain errors
+    c = 2 * atan(sqrt(a), sqrt(1-a))
+    
+    # Return angular distance in radians
+    return c
+end
+
+haversine_distance(lonlat1, lonlat2) = haversine_distance(lonlat1[1], lonlat1[2], lonlat2[1], lonlat2[2])
+
+function nearest_neighbor_interpolate_grid(original_lon_lat, new_lon_lat; metric_func = haversine_distance)
+
+    function min_dist_idx(target_point)
+        return argmin(metric_func(target_point, original_grid_point) for original_grid_point in original_lon_lat)
+    end
+
+    return min_dist_idx.(new_lon_lat)
+end
+
 visdir = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/vis/compare_stratocumulus_regions"
 savedir = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison"
 
@@ -95,6 +133,9 @@ ceres_data, ceres_coords = load_new_ceres_data([net_cre_var], time_period)
 mean_cre = mapslices(mean, ceres_data[net_cre_var], dims=(3,))[:,:,1]  # mean over time dimension
 lat = ceres_coords["latitude"]
 lon = ceres_coords["longitude"]
+
+ceres_lat = lat
+ceres_lon = lon
 
 fig = plot_global_heatmap(lat, lon, mean_cre; 
                           title="Climatological Mean Cloud Radiative Effect (2000-2025)", 
@@ -236,43 +277,26 @@ eralon = era5_coords["longitude"]
 println("Upscaling masks to ERA5 grid using nearest neighbor interpolation...")
 upscaled_masks = Dict()
 
+println("Upscaling masks")
+
+era_lonlat_grid = tuple.(eralon, eralat')
+ceres_lonlat_grid = tuple.(lon, lat')
+
+ceres_to_era5_indices = nearest_neighbor_interpolate_grid(ceres_lonlat_grid, era_lonlat_grid; metric_func=haversine_distance)
+
+era5_lsm = era5_data["lsm"][:,:,1]  # Take first time slice
+era5_ocean_mask = era5_lsm .< 0.5  # ERA5 LSM: 0=ocean, 1=land
+
+println("Downscaling Masks")
+
+era5_to_ceres_indices = nearest_neighbor_interpolate_grid(era_lonlat_grid, ceres_lonlat_grid; metric_func=haversine_distance)
+
 for (region_name, mask) in regional_masks
     println("Upscaling $region_name mask...")
     
-    # Create interpolation object for the mask (using nearest neighbor)
-    # Convert boolean mask to Float64 for interpolation
-    mask_float = Float64.(mask)
-    
-    # Simple nearest neighbor interpolation using geodetic distance
-    println("  Performing nearest neighbor interpolation...")
-    upscaled_mask_float = zeros(length(eralon), length(eralat))
-    
-    # Create coordinate arrays for CERES grid
-    ceres_lon_vec = vec(repeat(reshape(lon, :, 1), 1, length(lat)))
-    ceres_lat_vec = vec(repeat(reshape(lat, 1, :), length(lon), 1))
-    ceres_mask_vec = vec(mask_float)
-    
-    # For each ERA5 grid point, find nearest CERES point
-    for (i, era_lon) in enumerate(eralon)
-        for (j, era_lat) in enumerate(eralat)
-            # Calculate geodetic distances to all CERES points
-            distances = sqrt.((ceres_lon_vec .- era_lon).^2 .+ (ceres_lat_vec .- era_lat).^2)
-            
-            # Find index of nearest point
-            nearest_idx = argmin(distances)
-            
-            # Assign mask value from nearest CERES point
-            upscaled_mask_float[i, j] = ceres_mask_vec[nearest_idx]
-        end
-    end
-    
-    # Convert back to boolean (threshold at 0.5)
-    upscaled_mask = upscaled_mask_float .> 0.5
-    
     # Apply ERA5 land-sea mask (keep only ocean points)
-    era5_lsm = era5_data["lsm"][:,:,1]  # Take first time slice
-    era5_ocean_mask = era5_lsm .< 0.5  # ERA5 LSM: 0=ocean, 1=land
-    
+    upscaled_mask = mask[ceres_to_era5_indices]
+
     # Combine upscaled mask with ERA5 ocean mask
     upscaled_masks[region_name] = upscaled_mask .& era5_ocean_mask
     
@@ -281,10 +305,44 @@ for (region_name, mask) in regional_masks
     println("  Points in upscaled mask: $(sum(upscaled_masks[region_name]))")
 end
 
+#Now load in the other SEPac's mask
+other_region_name = "SEPac_feedback_definition"
+path_to_mask = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/SEPac_SST/sepac_sst_mask_and_weights.jld2"
+other_region_data = JLD2.load(path_to_mask)
+other_region_mask = other_region_data["final_mask"] .> 0.5  # Convert to boolean
 
+#Convert this grid from its native era5 to ceres grid
+# Downscale other_region_mask from ERA5 grid to CERES grid using haversine distance
+println("Downscaling $other_region_name mask from ERA5 to CERES grid using haversine distance...")
+
+# Perform nearest neighbor interpolation from ERA5 to CERES grid
+downscaled_other_mask = other_region_mask[era5_to_ceres_indices]
+
+# Add to regional_masks dictionary for consistency
+regional_masks[other_region_name] = downscaled_other_mask
+
+println("  Original ERA5 mask size: $(size(other_region_mask))")
+println("  Downscaled CERES mask size: $(size(downscaled_other_mask))")
+println("  Points in downscaled mask: $(sum(downscaled_other_mask))")
 
 # Save the masks and coordinates to JLD2 file
 println("Saving masks and coordinates...")
+regional_masks[other_region_name] = downscaled_other_mask  # Add the downscaled mask to the dictionary
+upscaled_masks[other_region_name] = other_region_mask  # Add the original ERA5 mask to the upscaled dictionary
+bounds[other_region_name] = Dict("lat_min"=>0, "lat_max"=>0, "lon_min"=>0, "lon_max"=>0)  # Placeholder bounds
+
+#Lastly save the region which is in the feedback definition but not in the cre definition
+sepac_cre_mask = upscaled_masks["SEPac"]
+high_res_mask = @. other_region_mask && !sepac_cre_mask
+
+sepac_low_res_cre_mask = regional_masks["SEPac"]
+low_res_mask = @. downscaled_other_mask && !sepac_low_res_cre_mask
+
+#Now push these masks to the dicts too
+region_name = "SEPac_feedback_only"
+regional_masks[region_name] = low_res_mask
+upscaled_masks[region_name] = high_res_mask
+bounds[region_name] = Dict("lat_min"=>0, "lat_max"=>0, "lon_min"=>0, "lon_max"=>0)  # Placeholder bounds
 
 # Save comprehensive dataset with all masks
 mask_data = Dict(

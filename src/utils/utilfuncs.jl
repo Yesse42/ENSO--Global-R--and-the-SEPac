@@ -132,7 +132,7 @@ calc_float_time(date_time) = year(date_time) + (month(date_time) - 1) / 12
 function time_lag(data, lag)
     lag = -lag
     T = eltype(data)
-    lagged_data = convert(Vector{Union{T, Missing}}, data)
+    lagged_data = convert(Vector{Union{T, Missing}}, copy(data))
     if lag == 0
         lagged_data
     elseif lag > 0
