@@ -57,6 +57,7 @@ function create_multi_projection_plot(shape, projection)
     
     return fig, axs, axes_flat
 end
+
 function plot_multiple_levels(lat, lon, data_slices, layout; subtitles, colorbar_label, cmap = cmr.prinsenvlag.reversed(), proj = ccrs.Robinson(central_longitude=180), colornorm = nothing)
     fig, axs, axes_flat = create_multi_projection_plot(layout, proj)
     
@@ -67,6 +68,13 @@ function plot_multiple_levels(lat, lon, data_slices, layout; subtitles, colorbar
     else
         # Calculate all_data even when colornorm is provided
         all_data = vcat([vec(slice) for slice in data_slices]...)
+    end
+
+    #Transpose the subtitles if needed
+    if subtitles isa Matrix
+        subtitles = permutedims(subtitles)
+    else
+        subtitles = permutedims(reshape(subtitles, layout[1], layout[2]))
     end
 
     for (i, ax) in enumerate(axes_flat[1:length(data_slices)])

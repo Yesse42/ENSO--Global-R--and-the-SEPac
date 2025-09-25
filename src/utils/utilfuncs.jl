@@ -145,3 +145,43 @@ function time_lag(data, lag)
         lagged_data
     end
 end
+
+"""
+    calculate_lag_correlations(reference_data, lagged_data_dict; lags=-24:24)
+
+Calculate correlation as a function of lag between reference data and lagged variables.
+
+# Arguments
+- `reference_data`: Vector of reference values (e.g., radiation data)
+- `lagged_data_dict`: Dictionary mapping lag values to corresponding lagged data vectors
+- `lags`: Range of lags to calculate correlations for (default: -24:24)
+
+# Returns
+- `Dict{Int, Float64}`: Sorted dictionary mapping lags to correlation values
+"""
+function calculate_lag_correlations(reference_data, lagged_data_dict; lags)
+    
+    correlations = Dict{Int, Float64}()
+    
+    for lag in lags
+        # Get lagged data for this lag
+        if haskey(lagged_data_dict, lag)
+            lagged_data = lagged_data_dict[lag]
+            
+            # Find valid indices (non-missing values)
+            valid_indices = .!(ismissing.(reference_data) .| ismissing.(lagged_data))
+            
+            if sum(valid_indices) > 0
+                # Calculate correlation
+                correlations[lag] = cor(reference_data[valid_indices], lagged_data[valid_indices])
+            else
+                correlations[lag] = NaN
+            end
+        else
+            correlations[lag] = NaN
+        end
+    end
+    
+    # Return sorted dictionary
+    return Dictionary(lags, [correlations[lag] for lag in lags])
+end
