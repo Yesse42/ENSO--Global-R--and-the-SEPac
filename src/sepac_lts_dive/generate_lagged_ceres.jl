@@ -21,6 +21,7 @@ global_rad_data, global_coords = load_new_ceres_data(rad_variables, date_range)
 global_coords["time"] = round.(global_coords["time"], Dates.Month(1), RoundDown)
 float_times = calc_float_time.(global_coords["time"])
 months = month.(global_coords["time"])
+month_groups = SplitApplyCombine.groupfind(month, global_coords["time"])
 
 println("Loaded data for $(length(global_coords["time"])) time steps")
 println("Variables: $(join(rad_variables, ", "))")
@@ -41,11 +42,11 @@ for var_name in rad_variables
     println("Processing variable: $var_name")
     
     # Get the time series data
-    raw_data = global_rad_data[var_name]
+    raw_data = copy(global_rad_data[var_name])
     
     # Detrend and deseasonalize the data
     println("  Detrending and deseasonalizing...")
-    detrend_and_deseasonalize!(raw_data, float_times, months)
+    detrend_and_deseasonalize_precalculated_groups!(raw_data, float_times, month_groups)
     processed_data = raw_data
     
     # Generate lagged versions

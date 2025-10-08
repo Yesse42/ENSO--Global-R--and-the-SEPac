@@ -70,8 +70,8 @@ for var in ceres_varnames
 end
 
 # Load in the ERA5 data using load_funcs.jl
-single_level_vars = ["t2m", "msl", "u10", "v10"]
-pressure_level_vars = ["t", "w", "z", "u", "v"]
+single_level_vars = ["t2m"]
+pressure_level_vars = ["t"]
 era5_vars = vcat(single_level_vars, pressure_level_vars)
 era5_data, era5_coords = load_era5_data(era5_vars, analysis_bounds, pressure_level_file = "new_pressure_levels.nc")
 era5_lat = era5_coords["latitude"]
@@ -105,10 +105,9 @@ ceres_local_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds
 nonlocal_rad_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], nonlocal_rad_df)
 ceres_global_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], ceres_global_df)
 
-lags_of_interest = [-6, -3, 0, 3, 6]
-
 local_df = DataFrames.innerjoin(era5_local_df, ceres_local_df, nonlocal_rad_df, ceres_global_df, on = :date)
 
+lags_of_interest = [-6, -3, 0, 3, 6]
 single_level_grids = [ceres_data[var] for var in ceres_varnames]
 
 time_series_correlates = ["toa_net_all_mon", "toa_net_lw_mon", "toa_net_sw_mon", "LTS_1000", "θ_1000", "θ_700", "ω_500", "sfc_wind_speed"]

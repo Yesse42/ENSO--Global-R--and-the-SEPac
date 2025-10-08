@@ -12,9 +12,30 @@ end
 
 function least_squares_fit(x, y)
     n = length(x)
-    A = hcat(x, ones(n))
-    sol =  A \ y
-    return (;slope = sol[1], intercept = sol[2])
+    
+    # Use analytical formulas for better numerical stability and efficiency
+    x_mean = sum(x) / n
+    y_mean = sum(y) / n
+    
+    # Calculate sums of squares and cross products in a single pass
+    sxx = zero(eltype(x))
+    sxy = zero(promote_type(eltype(x), eltype(y)))
+    
+    @inbounds for i in 1:n
+        x_dev = x[i] - x_mean
+        sxx += x_dev * x_dev
+        sxy += x_dev * (y[i] - y_mean)
+    end
+    
+    # Handle degenerate case where all x values are the same
+    if sxx == 0
+        return (;slope = 0.0, intercept = y_mean)
+    end
+    
+    slope = sxy / sxx
+    intercept = y_mean - slope * x_mean
+    
+    return (;slope, intercept)
 end
 
 get_lsq_slope(x, y) = least_squares_fit(x, y).slope
@@ -64,6 +85,15 @@ function deseasonalize!(slice, idx_groups, idx_means)
     return slice
 end
 
+function deseasonalize!(slice, months)
+    idx_groups = get_seasonal_cycle(months)
+    for idxs in idx_groups
+        mean_val = mean(slice[idxs])
+        @. slice[idxs] -= mean_val
+    end
+    return slice
+end
+
 function reseasonalize(slice, idx_groups, idx_means)
     for (idxs, mean) in zip(idx_groups, idx_means)
         @. slice[idxs] += mean
@@ -89,7 +119,7 @@ function deseasonalize_strongly_trended_data!(slice, times; monthfunc = month, a
     end
     # Deseasonalize the original slice
     deseasonalize!(slice, idx_groups, idx_means)
-    return slice
+    return nothing
 end
 
 function detrend_and_deseasonalize_precalculated_groups!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit)
@@ -102,6 +132,20 @@ function detrend_and_deseasonalize_precalculated_groups!(slice, float_times, idx
         mean_val = aggfunc(slice[idx] for idx in idx_group)
         @. slice[idx_group] -= mean_val
     end
+    return nothing
+end
+
+function deseasonalize_and_detrend_precalculated_groups!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit)
+    # Calculate the means for each month
+    for idx_group in idx_groups
+        mean_val = aggfunc(slice[idx] for idx in idx_group)
+        @. slice[idx_group] -= mean_val
+    end
+    # Fit the trend
+    fit = trendfunc(float_times, slice)
+    # Detrend the copy
+    detrend!(slice, float_times, fit.slope, fit.intercept)
+    return nothing
 end
 
 function detrend_and_deseasonalize!(slice, float_times, months; aggfunc = mean, trendfunc = least_squares_fit)
@@ -115,7 +159,9 @@ function detrend_and_deseasonalize!(slice, float_times, months; aggfunc = mean, 
         aggfunc(slice[idxs])
     end
     # Deseasonalize the original slice
-    deseasonalize!(slice, idx_groups, idx_means)
+    for (idxs, mean) in zip(idx_groups, idx_means)
+        @. slice[idxs] -= mean
+    end
     return (slice, fit)
 end
 
@@ -184,4 +230,14 @@ function calculate_lag_correlations(reference_data, lagged_data_dict; lags)
     
     # Return sorted dictionary
     return Dictionary(lags, [correlations[lag] for lag in lags])
+end
+
+function detrend_each_season_individually!(slice, float_times, month_groups; trendfunc = least_squares_fit)
+    for idx_group in month_groups
+        times = float_times[idx_group]
+        slice_view = @view slice[idx_group]
+        fit = trendfunc(times, slice_view)
+        detrend!(slice_view, times, fit.slope, fit.intercept)
+    end
+    return nothing
 end

@@ -25,7 +25,7 @@ end
 
 era5_vars = ["t2m", "msl", "t", "w", "u10", "v10"]
 
-all_time = (Date(0), Date(100000))
+all_time = (Date(2000, 3), Date(2024, 3, 31))
 
 era5_data, era5_coords = load_era5_data(era5_vars, all_time, pressure_level_file = "new_pressure_levels.nc")
 
@@ -83,7 +83,7 @@ ceres_data, ceres_coords = load_new_ceres_data(ceres_varnames, ceres_period)
 ceres_time = ceres_coords["time"]
 ceres_time .= round.(ceres_time, Dates.Month(1), RoundDown)
 
-enso_data, enso_dates = load_enso_data(all_time)
+enso_data, enso_dates = load_enso_data((Date(0), Date(2050)))
 enso_dates = enso_dates["time"]
 enso_dates .= round.(enso_dates, Dates.Month(1), RoundDown)
 enso_df = DataFrame(["date" => enso_dates, pairs(enso_data)...])
