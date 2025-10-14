@@ -1,5 +1,5 @@
 """
-Investigate the utter bizarreness of the hemispheric correlation patterns
+GSS Plots
 """
 
 cd(@__DIR__)
@@ -10,7 +10,7 @@ include("../pls_regressor/pls_functions.jl")
 
 using CSV, DataFrames, Plots
 
-deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit) = for _ in 1:3
+deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit) = for _ in 1:2
     deseasonalize_and_detrend_precalculated_groups!(slice, float_times, idx_groups; aggfunc, trendfunc)
     nothing
 end
@@ -94,12 +94,10 @@ for colname in names(sepac_local_df)
     end
 end
 
-#Now make plot 1: Theta_1000 vs global R
-corrs_theta_1000_r = cor.(Ref(ceres_global_rad), eachslice(era5_single_level_data["theta_1000"], dims=(1,2)))
-
-fig = plot_global_heatmap(era5_lat, era5_lon, corrs_theta_1000_r; title = "Correlation between T_1000 and Global Net Radiation", colorbar_label = "Correlation Coefficient")
-fig.savefig(joinpath(visdir, "theta_1000_vs_global_R_correlation.png"), dpi=300)
-plt.close(fig)
+#Lastly load in the masks 
+using JLD2
+mask_dict = load("/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison/stratocumulus_region_masks.jld2")
+sepac_mask = mask_dict["regional_masks_era5"]["SEPac_feedback_definition"]
 
 #Aside: Calculate the correlation between ceres net rad in the sepac and global ceres net rad
 sepac_net_rad = sepac_local_df[!, :toa_net_all_mon]
@@ -109,6 +107,66 @@ println("Correlation between CERES net radiation in the SEPac and global CERES n
 #Also calculate and print the std of ceres_global_rad for context
 std_ceres_global_rad = std(ceres_global_rad)
 println("Standard deviation of global CERES net radiation: $std_ceres_global_rad W/m²")
+
+#Aside again: Calculate the corr between sepac LTS_1000 and sepac local net rad
+sepac_lts = sepac_local_df[!, :LTS_1000]
+lts_net_rad_corr = cor(sepac_lts, sepac_net_rad)
+println("Correlation between SEPac LTS and SEPac net radiation: $lts_net_rad_corr")
+
+#Corr between sepac LTS and global ceres net rad
+lts_global_rad_corr = cor(sepac_lts, ceres_global_rad)
+println("Correlation between SEPac LTS and global CERES net radiation: $lts_global_rad_corr")
+
+#Aside again: Calculate the corr between sepac theta_1000 and sepac local net rad
+sepac_theta_1000 = sepac_local_df[!, :θ_1000]
+theta_1000_net_rad_corr = cor(sepac_theta_1000, sepac_net_rad)
+println("Correlation between SEPac θ₁₀₀₀ and SEPac net radiation: $theta_1000_net_rad_corr")
+
+#Aside again: Calculate the corr between sepac theta_700 and sepac local net rad
+sepac_theta_700 = sepac_local_df[!, :θ_700]
+theta_700_net_rad_corr = cor(sepac_theta_700, sepac_net_rad)
+println("Correlation between SEPac θ₇₀₀ and SEPac net radiation: $theta_700_net_rad_corr")
+
+#Aside again: calculate the corr between theta_1000 and global ceres net rad
+theta_1000_global_rad_corr = cor(sepac_theta_1000, ceres_global_rad)
+println("Correlation between SEPac θ₁₀₀₀ and global CERES net radiation: $theta_1000_global_rad_corr")
+
+#Aside again: Use PLS to predict SEPac net rad from lagged ENSO
+lags = -24:24
+full_enso_df = DataFrame(collect(enso_data), string.(lags))
+nonmissing_enso_times = [!any(ismissing, row) for row in eachrow(full_enso_df)]
+nonmissing_common_times = common_times[nonmissing_enso_times]
+pls_X = reduce(hcat, [enso_data["oni_lag_$lag"][nonmissing_enso_times] for lag in lags])
+pls_Y = sepac_local_df[nonmissing_enso_times, :toa_net_all_mon]
+n_components = 1
+pls_model = make_pls_regressor(pls_X, pls_Y, n_components; print_updates=false)
+#Get the scores
+predicted_net_rad = vec(predict(pls_model, pls_X))
+enso_sepac_net_rad_corr = cor(predicted_net_rad, pls_Y)
+println("Correlation between PLS-predicted SEPac net radiation from ENSO and actual SEPac net radiation: $enso_sepac_net_rad_corr")
+
+#Aside again:Use pls to predict global ceres net rad from lagged ENSO
+pls_Y_global = ceres_global_rad[nonmissing_enso_times]
+pls_model_global = make_pls_regressor(pls_X, pls_Y_global, n_components; print_updates=false)
+#Get the scores
+predicted_global_net_rad = vec(predict(pls_model_global, pls_X))
+enso_global_net_rad_corr = cor(predicted_global_net_rad, pls_Y_global)
+println("Correlation between PLS-predicted global net radiation from ENSO and actual global net radiation: $enso_global_net_rad_corr")
+
+#Aside again: Calculate the corr between theta_700 and theta_1000
+theta_700_theta_1000_corr = cor(sepac_theta_700, sepac_theta_1000)
+println("Correlation between SEPac θ₇₀₀ and SEPac θ₁₀₀₀: $theta_700_theta_1000_corr")
+
+
+#Now make plot 1: Theta_1000 vs global R
+corrs_theta_1000_r = cor.(Ref(ceres_global_rad), eachslice(era5_single_level_data["theta_1000"], dims=(1,2)))
+
+fig = plot_global_heatmap(era5_lat, era5_lon, corrs_theta_1000_r; title = "Correlation between T_1000 and Global Net Radiation", colorbar_label = "Correlation Coefficient")
+ax = fig.axes[0]
+#Contour in the region mask
+contour = ax.contour(era5_lon, era5_lat, sepac_mask'; levels=[0.5], colors="black", linewidths=1.5, transform=ccrs.PlateCarree())
+fig.savefig(joinpath(visdir, "theta_1000_vs_global_R_correlation.png"), dpi=300)
+plt.close(fig)
 
 #Now make plot 2: Decompose T_SEPac into an ENSO-related component and a non-ENSO-related component
 #Calculate the lag with maximum correlation between T_1000 and ENSO
@@ -142,6 +200,11 @@ plot!(p3, ylims=ylims_range)
 fig = plot(p1, p2, p3, layout=(3,1), size=(800, 600))
 plot!(fig, suptitle="SEPac θ₁₀₀₀ Decomposition: Total, ENSO, and Non-ENSO Components")
 savefig(fig, joinpath(visdir, "sepac_theta_1000_components.png"))
+
+
+#Aside: calculate corr between enso residual t_1000 and global net rad
+residual_theta_1000_global_rad_corr = cor(sepac_non_enso_component, ceres_global_rad)
+println("Correlation between SEPac non-ENSO θ₁₀₀₀ and global CERES net radiation: $residual_theta_1000_global_rad_corr")
 
 #Now analyze the pattern of correlations between SEPac T_1000, the enso component, and the non enso component on the gridded net, sw, and lw radiation.
 #Ceres rad is the rows, SEPac theta components are the columns
@@ -503,3 +566,102 @@ fig8.suptitle("Radiation Response to SEPac θ₁₀₀₀, θ₇₀₀, and LTS"
 
 fig8.savefig(joinpath(visdir, "sepac_theta_comparison_radiation_regression_patterns.png"), dpi=300)
 plt.close(fig8)
+
+# Plot 9: New 2x1 plot with theta variables and their PLS ENSO components
+# First, calculate PLS ENSO components for theta_700 and theta_1000
+
+# For theta_1000
+pls_Y_theta_1000 = sepac_local_df[nonmissing_enso_times, :θ_1000]
+theta_1000_pls_model = make_pls_regressor(pls_X, pls_Y_theta_1000, n_components; print_updates=false)
+predicted_theta_1000_enso = vec(predict(theta_1000_pls_model, pls_X))
+
+# For theta_700
+pls_Y_theta_700 = sepac_local_df[nonmissing_enso_times, :θ_700]
+theta_700_pls_model = make_pls_regressor(pls_X, pls_Y_theta_700, n_components; print_updates=false)
+predicted_theta_700_enso = vec(predict(theta_700_pls_model, pls_X))
+
+# Create the 2x1 plot
+fig9 = plot(layout=(2,1), size=(1000, 800))
+
+# Top panel: Original theta_700 and theta_1000
+plot!(fig9, nonmissing_common_times, pls_Y_theta_700, 
+      subplot=1,
+      label="θ₇₀₀", 
+      linewidth=2, 
+      color=:red,
+      title="SEPac θ₇₀₀ and θ₁₀₀₀ Time Series, r=$(round(full_theta_corr, digits=3))",
+      ylabel="Temperature (K)",
+      legend=:topright)
+
+plot!(fig9, nonmissing_common_times, pls_Y_theta_1000, 
+      subplot=1,
+      label="θ₁₀₀₀", 
+      linewidth=2, 
+      color=:blue)
+
+# Bottom panel: Faint original theta variables plus their PLS ENSO components
+# (The title is set in the correlation calculation section above)
+
+plot!(fig9, nonmissing_common_times, pls_Y_theta_1000, 
+      subplot=2,
+      label="θ₁₀₀₀ (original)", 
+      linewidth=1, 
+      color=:blue,
+      alpha=0.3)
+
+plot!(fig9, nonmissing_common_times, predicted_theta_700_enso, 
+      subplot=2,
+      label="θ₇₀₀ ENSO component", 
+      linewidth=2, 
+      color=:darkred,
+      linestyle=:solid)
+
+plot!(fig9, nonmissing_common_times, predicted_theta_1000_enso, 
+      subplot=2,
+      label="θ₁₀₀₀ ENSO component", 
+      linewidth=2, 
+      color=:darkblue,
+      linestyle=:solid)
+
+# Calculate correlations for display
+theta_700_enso_corr = cor(predicted_theta_700_enso, pls_Y_theta_700)
+theta_1000_enso_corr = cor(predicted_theta_1000_enso, pls_Y_theta_1000)
+
+# Calculate additional correlations for the lower panel
+# Non-ENSO components (residuals)
+theta_700_non_enso = pls_Y_theta_700 - predicted_theta_700_enso
+theta_1000_non_enso = pls_Y_theta_1000 - predicted_theta_1000_enso
+
+# Correlations between components
+enso_components_corr = cor(predicted_theta_700_enso, predicted_theta_1000_enso)
+non_enso_components_corr = cor(theta_700_non_enso, theta_1000_non_enso)
+full_theta_corr = cor(pls_Y_theta_700, pls_Y_theta_1000)
+
+# Update the title for the lower panel to include additional correlations
+lower_panel_title = "PLS ENSO Components: ENSO r=$(round(enso_components_corr, digits=3)), Non-ENSO r=$(round(non_enso_components_corr, digits=3))"
+
+# Modify the bottom panel plot to use the new title
+plot!(fig9, nonmissing_common_times, pls_Y_theta_700, 
+      subplot=2,
+      label="θ₇₀₀ (original)", 
+      linewidth=1, 
+      color=:red,
+      alpha=0.3,
+      title=lower_panel_title,
+      ylabel="Temperature (K)",
+      xlabel="Date",
+      legend=:topright)
+
+# Add correlation info as subtitle
+plot!(fig9, suptitle="θ₇₀₀ ENSO r=$(round(theta_700_enso_corr, digits=3)), θ₁₀₀₀ ENSO r=$(round(theta_1000_enso_corr, digits=3))")
+
+# Save the plot
+savefig(fig9, joinpath(visdir, "sepac_theta_enso_components_2panel.png"))
+
+# Print correlations
+println("θ₇₀₀ ~ ENSO PLS correlation: $(round(theta_700_enso_corr, digits=4))")
+println("θ₁₀₀₀ ~ ENSO PLS correlation: $(round(theta_1000_enso_corr, digits=4))")
+println("ENSO components correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(enso_components_corr, digits=4))")
+println("Non-ENSO components correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(non_enso_components_corr, digits=4))")
+println("Full theta correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(full_theta_corr, digits=4))")
+

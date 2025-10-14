@@ -32,7 +32,7 @@ function generate_correlations_levels(grids, lagged_time_series_dict)
     corr_values = [calculate_corrfunc_grid(grid, ts; corrfunc = skipmissing_corr) for grid in grids, ts in lagged_time_series_dict]
 end
 
-analysis_bounds = (Date(2000, 3), Date(2024, 3, 31))
+analysis_bounds = (Date(2000, 3), Date(2023, 2, 28))
 
 # Load in the time series data for the southeast pacific variables
 region = "SEPac_feedback_definition"
@@ -41,6 +41,9 @@ region = "SEPac_feedback_definition"
 local_ts_dir = "../../data/sepac_lts_data/local_region_time_series"
 era5_local_df = CSV.read(joinpath(local_ts_dir, "era5_region_avg_lagged_$(region).csv"), DataFrame)
 ceres_local_df = CSV.read(joinpath(local_ts_dir, "ceres_region_avg_lagged_$(region).csv"), DataFrame)
+
+# Load in the ENSO-removed local time series data
+era5_enso_removed_df = CSV.read(joinpath(local_ts_dir, "era5_region_avg_enso_removed_$(region).csv"), DataFrame)
 
 ceres_global_df = CSV.read("/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/CERES/lagged/global_ceres_lagged_detrended_deseasonalized.csv", DataFrame)
 
@@ -66,12 +69,12 @@ ceres_precalculated_month_groups = groupfind(month, ceres_time)
 
 for var in ceres_varnames
     ceres_data[var] = ceres_data[var][:, :, ceres_time_valid]
-    detrend_and_deseasonalize_precalculated_groups!.(eachslice(ceres_data[var]; dims = (1,2)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
+    deseasonalize_and_detrend_precalculated_groups_twice!.(eachslice(ceres_data[var]; dims = (1,2)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
 end
 
 # Load in the ERA5 data using load_funcs.jl
-single_level_vars = ["t2m"]
-pressure_level_vars = ["t"]
+single_level_vars = []
+pressure_level_vars = ["t", "z", "u", "v", "w"]
 era5_vars = vcat(single_level_vars, pressure_level_vars)
 era5_data, era5_coords = load_era5_data(era5_vars, analysis_bounds, pressure_level_file = "new_pressure_levels.nc")
 era5_lat = era5_coords["latitude"]
@@ -84,12 +87,12 @@ era5_time = era5_time[in_time_period.(era5_time, Ref(analysis_bounds))]
 for all_var in pressure_level_vars
     era5_data[all_var] = era5_data[all_var][:,:,:,in_time_period.(era5_press_time, Ref(analysis_bounds))]
 
-    detrend_and_deseasonalize_precalculated_groups!.(eachslice(era5_data[all_var]; dims = (1,2,3)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
+    deseasonalize_and_detrend_precalculated_groups_twice!.(eachslice(era5_data[all_var]; dims = (1,2,3)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
 end
 for all_var in single_level_vars
     era5_data[all_var] = era5_data[all_var][:,:,in_time_period.(era5_time, Ref(analysis_bounds))]
 
-    detrend_and_deseasonalize_precalculated_groups!.(eachslice(era5_data[all_var]; dims = (1,2)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
+    deseasonalize_and_detrend_precalculated_groups_twice!.(eachslice(era5_data[all_var]; dims = (1,2)), Ref(ceres_float_time),Ref(ceres_precalculated_month_groups))
 end
 
 
@@ -105,18 +108,37 @@ ceres_local_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds
 nonlocal_rad_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], nonlocal_rad_df)
 ceres_global_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], ceres_global_df)
 
-local_df = DataFrames.innerjoin(era5_local_df, ceres_local_df, nonlocal_rad_df, ceres_global_df, on = :date)
+# Filter ENSO-removed data and convert date column
+era5_enso_removed_df[!, :date] = Date.(era5_enso_removed_df[!, :date])
+era5_enso_removed_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], era5_enso_removed_df)
+
+# Extract theta ENSO residuals from the ENSO-removed dataframe
+theta_residual_cols = filter(name -> contains(name, "θ_1000") || contains(name, "θ_700"), names(era5_enso_removed_df))
+theta_residuals_df = era5_enso_removed_df[:, vcat([:date], Symbol.(theta_residual_cols))]
+
+# Rename theta residual columns to distinguish them as ENSO-removed
+rename_dict = Dict{Symbol, Symbol}()
+for col in theta_residual_cols
+    if contains(col, "θ_1000")
+        rename_dict[Symbol(col)] = Symbol(replace(col, "θ_1000" => "θ_1000_enso_removed"))
+    elseif contains(col, "θ_700")
+        rename_dict[Symbol(col)] = Symbol(replace(col, "θ_700" => "θ_700_enso_removed"))
+    end
+end
+rename!(theta_residuals_df, collect(pairs(rename_dict)))
+
+local_df = DataFrames.innerjoin(era5_local_df, ceres_local_df, nonlocal_rad_df, ceres_global_df, theta_residuals_df, on = :date)
 
 lags_of_interest = [-6, -3, 0, 3, 6]
 single_level_grids = [ceres_data[var] for var in ceres_varnames]
 
-time_series_correlates = ["toa_net_all_mon", "toa_net_lw_mon", "toa_net_sw_mon", "LTS_1000", "θ_1000", "θ_700", "ω_500", "sfc_wind_speed"]
+time_series_correlates = ["toa_net_all_mon", "toa_net_lw_mon", "toa_net_sw_mon", "LTS_1000", "θ_1000", "θ_700", "θ_1000_enso_removed", "θ_700_enso_removed"]
 append!(time_series_correlates, global_toa_rad_names)
 
-connected_single_level_var = ["t2m", "msl", "u10", "v10"]
-connected_pressure_level_var = ["t", "z", "u", "v"]
+connected_single_level_var = []
+connected_pressure_level_var = []
 
-level_var_names = ["t", "press_geopotential", "u", "v"]
+level_var_names = []
 press_level_names = string.(era5_coords["pressure_level"]) .* " hPa"
 press_sfc_joint_names = vcat(["sfc"], press_level_names)
 
@@ -140,7 +162,7 @@ for var in time_series_correlates
         mkpath(var_save_dir)
         
         # Create lagged time series dictionary for different lags of interest using Dictionaries.jl
-        lagged_ts_dict = Dictionary()
+        lagged_ts_dict = Dictionary{Int, Vector{Union{Float64, Missing}}}()
         for lag in lags_of_interest
             lag_col_name = "$(var)_lag_$(lag)"
             if lag_col_name in names(local_df)
@@ -187,11 +209,11 @@ for var in time_series_correlates
     end
     if any(occursin.(var, names(local_df)))
         # Create specific save directory for this variable
-        var_save_dir = joinpath(base_save_dir, var)
+        var_save_dir = joinpath(base_save_dir, regionalized_name)
         mkpath(var_save_dir)
         
         # Create lagged time series dictionary for different lags of interest using Dictionaries.jl
-        lagged_ts_dict = Dictionary()
+        lagged_ts_dict = Dictionary{Int, Vector{Union{Float64, Missing}}}()
         for lag in lags_of_interest
             lag_col_name = "$(var)_lag_$(lag)"
             if lag_col_name in names(local_df)
@@ -207,8 +229,8 @@ for var in time_series_correlates
             n_levels = length(level_grids)
             n_lags = length(lagged_ts_dict)
 
-            out_corr_arr = Array{Any}(undef, n_levels, n_lags)
-            plot_labels = String[]
+            out_corr_arr = Array{Matrix{Float64}}(undef, n_levels, n_lags)
+            plot_labels = Array{String}(undef, n_levels, n_lags)
 
             grid_level_names = nothing
             if n_levels == length(press_sfc_joint_names)
@@ -221,14 +243,14 @@ for var in time_series_correlates
                 for (lag_idx, (lag_val, lag_ts)) in enumerate(pairs(lagged_ts_dict))
                     corr_value = calculate_corrfunc_grid(level_grids[level], lag_ts; corrfunc = skipmissing_corr)
                     out_corr_arr[level, lag_idx] = corr_value
-                    push!(plot_labels, "$(grid_level_names[level]) Lag $(lag_val)")
+                    plot_labels[level, lag_idx] = "$(grid_level_names[level]) Lag $(lag_val)"
                 end
             end
 
             out_corr_arr = vec(out_corr_arr)
             #Generate the plot
             fig = plot_multiple_levels(era5_lat, era5_lon, out_corr_arr, (n_levels, n_lags); 
-                                      subtitles=plot_labels, 
+                                      subtitles=vec(permutedims(plot_labels)), 
                                       colorbar_label="Correlation with $level_var_name",
                                       )
 

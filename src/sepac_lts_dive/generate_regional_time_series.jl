@@ -11,6 +11,7 @@ cd(@__DIR__)
 include("../utils/plot_global.jl")
 include("../utils/load_funcs.jl")
 include("../utils/utilfuncs.jl")
+include("../pls_regressor/pls_functions.jl")
 
 using JLD2
 
@@ -83,10 +84,17 @@ ceres_data, ceres_coords = load_new_ceres_data(ceres_varnames, ceres_period)
 ceres_time = ceres_coords["time"]
 ceres_time .= round.(ceres_time, Dates.Month(1), RoundDown)
 
-enso_data, enso_dates = load_enso_data((Date(0), Date(2050)))
+enso_data, enso_dates = load_enso_data(all_time)
 enso_dates = enso_dates["time"]
 enso_dates .= round.(enso_dates, Dates.Month(1), RoundDown)
-enso_df = DataFrame(["date" => enso_dates, pairs(enso_data)...])
+
+# Pregenerate complete ENSO DataFrame with all lag columns outside the loop
+enso_df = DataFrame(date = enso_dates)
+for (key, values) in pairs(enso_data)
+    enso_df[!, string(key)] = values
+end
+
+dropmissing!(enso_df)
 
 function missing_sensitive_corr(x, y)
     valid_idx = .!(ismissing.(x) .| ismissing.(y))
@@ -109,6 +117,32 @@ function remove_x_from_y_via_linear_regression(x,y)
     return out
 end
 
+"Decompose y into ENSO-correlated and ENSO-uncorrelated components using PLS"
+function decompose_via_pls(joint_df, y)
+    lags = -24:24
+    lag_columns = ["oni_lag_$lag" for lag in lags]
+    pls_X = Matrix(joint_df[!, lag_columns])
+    pls_Y = y
+    
+    n_components = 1
+    pls_model = make_pls_regressor(pls_X, pls_Y, n_components; print_updates=false)
+    predicted_y = vec(predict(pls_model, pls_X))
+    pls_corr = cor(predicted_y, pls_Y)
+    
+    return predicted_y, pls_Y - predicted_y, pls_corr
+end
+
+"Remove ENSO signal using PLS method"
+function remove_enso_via_pls(enso_df, var_df, var_name, compare_dates)
+    detrend_name = Symbol(var_name)
+    compare_df = DataFrames.innerjoin(enso_df, var_df[:, [:date, detrend_name]], on = :date)
+    
+    _, enso_residual, pls_corr = decompose_via_pls(compare_df, compare_df[!, detrend_name])
+    println("PLS correlation for $var_name: $pls_corr")
+    
+    return enso_residual
+end
+
 detrend_deseason_suffix = ""
 lag_suffix = "_lag_"
 
@@ -120,13 +154,19 @@ enso_compare_dates = (Date(2000), Date(2022, 4))
 
 savedir = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/sepac_lts_data/local_region_time_series"
 
+enso_notmissing_era5_idxs = findall(t -> t in enso_df.date, era5_time)
+enso_notmissing_era5_time = era5_time[enso_notmissing_era5_idxs]
+
+enso_notmissing_ceres_idxs = findall(t -> t in enso_df.date, ceres_time)
+enso_notmissing_ceres_time = ceres_time[enso_notmissing_ceres_idxs]
+
 for region in region_names
     #Load in the era5 mask for the region
     era5_mask = era5_masks[region]
 
     era5_df = DataFrame(date = era5_time)
     era5_lagged_df = DataFrame(date = era5_time)
-    era5_enso_lagged_df = DataFrame(date = era5_time)
+    era5_enso_lagged_df = DataFrame(date = enso_notmissing_era5_time)
     #Now form the weighted average time series for all era5 fluxes
     for var in keys(era5_data_dict)
         println("Processing $var for $region")
@@ -136,8 +176,9 @@ for region in region_names
 
         #Add a detrended and deseasonalized version of the time series
         detrend_deseason_name = Symbol(var * detrend_deseason_suffix)
-        detrend_deseasoned, _ = detrend_and_deseasonalize!(copy(mean_ts), era5_float_times, era5_months)
+        detrend_deseasoned, _ = deseasonalize_and_detrend!(copy(mean_ts), era5_float_times, era5_months)
         era5_df[!, detrend_deseason_name] = detrend_deseasoned
+
 
         #Now, generate the lagged time series
         for lag in standard_lags
@@ -145,16 +186,8 @@ for region in region_names
             era5_lagged_df[!, lagged_name] = time_lag(detrend_deseasoned, lag)
         end
 
-        #Now compute the lagged enso index which has maximum correlation with the detrended and deseasonalized time series
-        joined_data_df = DataFrames.innerjoin(enso_df, era5_df[:, [:date, detrend_deseason_name]], on = :date)
-        oni_compare_dates_df = filter(row -> in_time_period(row.date, enso_compare_dates), joined_data_df)
-        opt_corr, opt_lag_idx = findmax([abs(missing_sensitive_corr(oni_compare_dates_df[!, "oni_lag_$lag"], oni_compare_dates_df[!, detrend_deseason_name])) for lag in standard_lags])
-        opt_lag = standard_lags[opt_lag_idx]
-
-        display("The optimal lag for $var in $region is $opt_lag months, with corr of $opt_corr")
-
-        #Now remove the optimal enso lag from the detrend deseasoned
-        enso_residual = remove_x_from_y_via_linear_regression(joined_data_df[!, "oni_lag_$opt_lag"], joined_data_df[!, detrend_deseason_name])
+        #Remove ENSO signal using PLS method
+        enso_residual = remove_enso_via_pls(enso_df, era5_df[enso_notmissing_era5_idxs, :], detrend_deseason_name, enso_compare_dates)
 
         #Now lag the residual time series
         for lag in standard_lags
@@ -170,7 +203,7 @@ for region in region_names
 
     ceres_df = DataFrame(date = ceres_time)
     ceres_lagged_df = DataFrame(date = ceres_time)
-    ceres_enso_lagged_df = DataFrame(date = ceres_time)
+    ceres_enso_lagged_df = DataFrame(date = enso_notmissing_ceres_time)
 
     #Now form the weighted average time series for all ceres fluxes
     for var in ceres_varnames
@@ -183,7 +216,7 @@ for region in region_names
         ceres_float_times = calc_float_time.(ceres_time)
         ceres_months = month.(ceres_time)
         detrend_deseason_name = Symbol(var * detrend_deseason_suffix)
-        detrend_deseasoned, _ = detrend_and_deseasonalize!(copy(mean_ts), ceres_float_times, ceres_months)
+        detrend_deseasoned, _ = deseasonalize_and_detrend!(copy(mean_ts), ceres_float_times, ceres_months)
         ceres_df[!, detrend_deseason_name] = detrend_deseasoned
 
         #Now, generate the lagged time series
@@ -192,14 +225,8 @@ for region in region_names
             ceres_lagged_df[!, lagged_name] = time_lag(detrend_deseasoned, lag)
         end
 
-        #Now compute the lagged enso index which has maximum correlation with the detrended and deseasonalized time series
-        joined_data_df = DataFrames.innerjoin(enso_df, ceres_df[:, [:date, detrend_deseason_name]], on = :date)
-        oni_compare_dates_df = filter(row -> in_time_period(row.date, enso_compare_dates), joined_data_df)
-        opt_lag_idx = argmax([abs(missing_sensitive_corr(oni_compare_dates_df[!, "oni_lag_$lag"], oni_compare_dates_df[!, detrend_deseason_name])) for lag in standard_lags])
-        opt_lag = standard_lags[opt_lag_idx]
-
-        #Now remove the optimal enso lag from the detrend deseasoned
-        enso_residual = remove_x_from_y_via_linear_regression(joined_data_df[!, "oni_lag_$opt_lag"], joined_data_df[!, detrend_deseason_name])
+        #Remove ENSO signal using PLS method
+        enso_residual = remove_enso_via_pls(enso_df, ceres_df[enso_notmissing_ceres_idxs, :], detrend_deseason_name, enso_compare_dates)
 
         #Now lag the residual time series
         for lag in standard_lags

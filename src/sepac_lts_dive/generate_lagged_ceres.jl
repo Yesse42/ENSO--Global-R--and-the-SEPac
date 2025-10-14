@@ -46,7 +46,7 @@ for var_name in rad_variables
     
     # Detrend and deseasonalize the data
     println("  Detrending and deseasonalizing...")
-    detrend_and_deseasonalize_precalculated_groups!(raw_data, float_times, month_groups)
+    deseasonalize_and_detrend_precalculated_groups_twice!(raw_data, float_times, month_groups)
     processed_data = raw_data
     
     # Generate lagged versions

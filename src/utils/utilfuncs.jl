@@ -241,3 +241,30 @@ function detrend_each_season_individually!(slice, float_times, month_groups; tre
     end
     return nothing
 end
+
+deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit) = for _ in 1:2
+    deseasonalize_and_detrend_precalculated_groups!(slice, float_times, idx_groups; aggfunc, trendfunc)
+    nothing
+end
+
+function deseasonalize_and_detrend!(slice, float_times, months; aggfunc = mean, trendfunc = least_squares_fit)
+    # Get month indices
+    idx_groups = get_seasonal_cycle(months)
+    idx_means = map(idx_groups) do idxs
+        aggfunc(slice[idxs])
+    end
+    # Deseasonalize first
+    for (idxs, mean) in zip(idx_groups, idx_means)
+        @. slice[idxs] -= mean
+    end
+    # Then fit the trend and detrend
+    fit = trendfunc(float_times, slice)
+    detrend!(slice, float_times, fit.slope, fit.intercept)
+    return (slice, fit)
+end
+
+deseasonalize_and_detrend_twice!(slice, float_times, months; aggfunc = mean, trendfunc = least_squares_fit) = for _ in 1:2
+    deseasonalize_and_detrend!(slice, float_times, months; aggfunc, trendfunc)
+    nothing
+end
+
