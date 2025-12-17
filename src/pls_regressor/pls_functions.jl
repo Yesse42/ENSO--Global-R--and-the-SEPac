@@ -5,7 +5,7 @@ include("pls_structs.jl")
 cd(olddir)
 
 "Normalizes the input; also returns the data necessary to denormalize the output."
-function normalize_input!(X, meanfunc = mean, stdfunc = (x...;kwargs...) -> 1)
+function normalize_input!(X, meanfunc, stdfunc)
     means = meanfunc(X; dims=1)
     #Normalize the input
     X .-= means
@@ -157,4 +157,39 @@ function make_matrix_to_multiply_by_X_to_get_Y(pls; components = Colon())
     P = @views pls.X_weights[:, components] * pinv(pls.X_loadings[:, components]' * pls.X_weights[:, components])
     coeffs = @views P * pls.Y_loadings[:, components]'
     return coeffs
+end
+
+function make_P_matrix(pls; components = Colon())
+    P = @views pls.X_weights[:, components] * pinv(pls.X_loadings[:, components]' * pls.X_weights[:, components])
+    return P
+end
+
+function make_matrix_to_get_covarying_pattern_in_Y(pls; components = Colon())
+    P = @views pls.Y_weights[:, components] * pinv(pls.Y_loadings[:, components]' * pls.Y_weights[:, components])
+    covarying_pattern = @views P * pls.X_loadings[:, components]'
+    return covarying_pattern
+end
+
+function create_curried_fill(value)
+    return function(arr; dims)
+        new_shape = ntuple(i -> if i in dims 1 else size(arr, i) end, ndims(arr))
+        return fill(value, new_shape)
+    end
+end
+const nostd = create_curried_fill(1.0)
+const nomean = create_curried_fill(0.0)
+
+function get_pls_prediction_slice(X, slice; n_component, meanfunc, stdfunc)
+    pls_model = make_pls_regressor(X, slice, n_component; print_updates=false, meanfunc, stdfunc)
+    pred_slice = vec(predict(pls_model, X))
+    return pred_slice
+end
+
+function pointwise_pls(X, Y;n_components = 3, slice_dims = (1,2), meanfunc = mean, stdfunc = my_std_func)
+    pls_preds = similar(Y)
+    for (save_slice, calc_slice) in zip(eachslice(pls_preds, dims=slice_dims), eachslice(Y, dims=slice_dims))
+        pred_slice = get_pls_prediction_slice(X, calc_slice; n_component=n_components, meanfunc, stdfunc)
+        save_slice .= pred_slice
+    end
+    return pls_preds
 end

@@ -1,4 +1,9 @@
-using SplitApplyCombine, Dates, Statistics, StatsBase, NCDatasets, Dictionaries
+using SplitApplyCombine, Dates, Statistics, StatsBase, NCDatasets, Dictionaries, Unitful
+
+current_dir = pwd()
+cd(@__DIR__)
+include("calculate_eis.jl")
+cd(current_dir)
 
 function theil_sen_fit(x, y)
     n = length(x)
@@ -268,3 +273,15 @@ deseasonalize_and_detrend_twice!(slice, float_times, months; aggfunc = mean, tre
     nothing
 end
 
+function deseasonalize_precalculated_groups(slice, idx_groups; aggfunc = mean)
+    for idx_group in idx_groups
+        mean_val = aggfunc(slice[idx_group])
+        @. slice[idx_group] -= mean_val
+    end
+    return slice
+end
+
+function generate_spatial_mean(data, latitudes, mask)
+    replace!(data, missing => NaN)
+    return vec(sum(data .* mask .* cosd.(latitudes'); dims=(1, 2)) ./ sum(mask .* cosd.(latitudes')))
+end

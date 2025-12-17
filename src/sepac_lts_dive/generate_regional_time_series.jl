@@ -42,14 +42,18 @@ sfc_var_times = era5_coords["time"]
 p_levels_time = era5_coords["pressure_time"]
 valid_pressure_times = findall(t -> t in sfc_var_times, p_levels_time)
 
+sfc_temp = era5_data["t2m"][:,:,valid_pressure_times]
 sfc_pot_temp = pot_temp.(era5_data["t2m"], era5_data["msl"]/100)  # Convert Pa to hPa
 
-pot_temp_1000 = pot_temp.(era5_data["t"][:,:, idx_1000_hpa, valid_pressure_times], 1000)  # Convert Pa to hPa
-
-pot_temp_700 = pot_temp.(era5_data["t"][:,:,idx_700_hpa, valid_pressure_times], 700)
+t_1000 = era5_data["t"][:,:,idx_1000_hpa, valid_pressure_times]
+t_700 = era5_data["t"][:,:,idx_700_hpa, valid_pressure_times]
+pot_temp_1000 = pot_temp.(t_1000, 1000)  # Convert Pa to hPa
+pot_temp_700 = pot_temp.(t_700, 700)
 
 LTS_sfc = pot_temp_700 .- sfc_pot_temp
 LTS_1000 = pot_temp_700 .- pot_temp_1000
+
+EIS = calculate_EIS.(sfc_temp, t_700)
 
 w_500 = era5_data["w"][:,:,idx_500_hpa, valid_pressure_times]
 
@@ -59,7 +63,7 @@ sfc_wind_speed = hypot.(era5_data["u10"], era5_data["v10"])
 mask_file = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison/stratocumulus_region_masks.jld2"
 region_data = JLD2.load(mask_file)
 
-era5_data_dict = Dictionary(["t2m", "LTS_sfc", "LTS_1000", "θ_1000", "θ_700", "θ_sfc", "ω_500", "sfc_wind_speed"], [era5_data["t2m"], LTS_sfc, LTS_1000, pot_temp_1000, pot_temp_700, sfc_pot_temp, w_500, sfc_wind_speed])
+era5_data_dict = Dictionary(["t2m", "LTS_sfc", "LTS_1000", "θ_1000", "θ_700", "θ_sfc", "ω_500", "sfc_wind_speed", "EIS"], [era5_data["t2m"], LTS_sfc, LTS_1000, pot_temp_1000, pot_temp_700, sfc_pot_temp, w_500, sfc_wind_speed, EIS])
 
 era5_time = era5_coords["time"][1:end]
 era5_float_times = calc_float_time.(era5_time)

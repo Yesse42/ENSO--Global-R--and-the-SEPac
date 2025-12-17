@@ -8,7 +8,7 @@ include("../utils/utilfuncs.jl")
 include("../utils/plot_global.jl")
 include("../pls_regressor/pls_functions.jl")
 
-using CSV, DataFrames, Plots
+using CSV, DataFrames, Plots, JLD2
 
 deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, idx_groups; aggfunc = mean, trendfunc = least_squares_fit) = for _ in 1:2
     deseasonalize_and_detrend_precalculated_groups!(slice, float_times, idx_groups; aggfunc, trendfunc)
@@ -46,10 +46,11 @@ p_700_idx = findfirst(era5_coords["pressure_level"] .== 700)
 theta_1000 = calc_theta.(era5_data["t"][:,:, p_1000_idx, :], 1000)
 theta_700 = calc_theta.(era5_data["t"][:,:, p_700_idx, :], 700)
 LTS = theta_700 .- theta_1000
+EIS = calculate_EIS.(era5_data["t"][:,:, p_1000_idx, :], era5_data["t"][:,:, p_700_idx, :]; RH_0 = 0.8)
 
 #Add them to the data variables
-era5_sl_var_names = ["LTS", "theta_1000", "theta_700", "t2m"]
-era5_single_level_data = Dictionary(era5_sl_var_names, [LTS, theta_1000, theta_700, era5_data["t2m"]])
+era5_sl_var_names = ["LTS", "theta_1000", "theta_700", "t2m", "EIS"]
+era5_single_level_data = Dictionary(era5_sl_var_names, [LTS, theta_1000, theta_700, era5_data["t2m"], EIS])
 
 #Load in the ENSO index data
 enso_data, enso_time = load_enso_data(time_period)
@@ -292,9 +293,9 @@ for (i, era5_data) in enumerate(era5_plot4_data)
 
         #Scale by the appropriate factors so the total regression coeff plus the enso regression coeff equal the residual regression coeff
         if j == 1
-            out_arrs_plot4[i, j] .*= total_sepac_std/residual_sepac_std
+            #out_arrs_plot4[i, j] .*= total_sepac_std/residual_sepac_std
         elseif j == 2
-            out_arrs_plot4[i, j] .*= enso_component_std/residual_sepac_std
+            #out_arrs_plot4[i, j] .*= enso_component_std/residual_sepac_std
         end
     end
 end
@@ -372,7 +373,7 @@ r_squared = 1 - (ss_residual / ss_total)
 # Create 3-panel plot of SEPac LTS components
 p1_lts = plot(nonmissing_common_times, sepac_total_lts, title="Total LTS", ylabel="LTS (K)", label="")
 p2_lts = plot(nonmissing_common_times, sepac_lts_enso_component, 
-              title="ENSO Component (R² = $(round(r_squared, digits=3))", 
+              title="ENSO Component (R² = $(round(r_squared, digits=3)))", 
               ylabel="LTS (K)", label="", 
               linewidth=2, color=:blue)
 plot!(p2_lts, nonmissing_common_times, sepac_total_lts, 
@@ -417,9 +418,9 @@ for (i, ceres_data) in enumerate(ceres_gridded_rad_data_reduced)
 
         # Scale by the appropriate factors so the total regression coeff plus the enso regression coeff equal the residual regression coeff
         if j == 1
-            out_arrs_plot6[i, j] .*= total_lts_std/residual_lts_std
+            #out_arrs_plot6[i, j] .*= total_lts_std/residual_lts_std
         elseif j == 2
-            out_arrs_plot6[i, j] .*= enso_lts_component_std/residual_lts_std
+            #out_arrs_plot6[i, j] .*= enso_lts_component_std/residual_lts_std
         end
     end
 end
@@ -480,9 +481,9 @@ for (i, era5_data) in enumerate(era5_plot7_data)
 
         # Scale by the appropriate factors so the total regression coeff plus the enso regression coeff equal the residual regression coeff
         if j == 1
-            out_arrs_plot7[i, j] .*= total_lts_std/residual_lts_std
+            #out_arrs_plot7[i, j] .*= total_lts_std/residual_lts_std
         elseif j == 2
-            out_arrs_plot7[i, j] .*= enso_lts_component_std/residual_lts_std
+            #out_arrs_plot7[i, j] .*= enso_lts_component_std/residual_lts_std
         end
     end
 end
@@ -580,6 +581,8 @@ pls_Y_theta_700 = sepac_local_df[nonmissing_enso_times, :θ_700]
 theta_700_pls_model = make_pls_regressor(pls_X, pls_Y_theta_700, n_components; print_updates=false)
 predicted_theta_700_enso = vec(predict(theta_700_pls_model, pls_X))
 
+full_theta_corr = cor(pls_Y_theta_1000, pls_Y_theta_700)
+
 # Create the 2x1 plot
 fig9 = plot(layout=(2,1), size=(1000, 800))
 
@@ -665,3 +668,392 @@ println("ENSO components correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(en
 println("Non-ENSO components correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(non_enso_components_corr, digits=4))")
 println("Full theta correlation (θ₇₀₀ vs θ₁₀₀₀): $(round(full_theta_corr, digits=4))")
 
+# Plot 10: Pointwise correlations between CERES net radiation and LTS/EIS
+println("Calculating pointwise correlations between CERES net radiation and LTS/EIS...")
+
+# Load the coordinate mapping indices
+coord_mapping_file = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison/era5_ceres_coordinate_mapping.jld2"
+coord_mapping = JLD2.load(coord_mapping_file)
+era5_to_ceres_indices = Tuple.(coord_mapping["era5_to_ceres_indices"])
+ceres_to_era5_indices = coord_mapping["ceres_to_era5_indices"]
+
+# Get CERES net radiation data (use the full time series, not the reduced one)
+ceres_net_rad = ceres_gridded_rad["toa_net_all_mon"]
+
+# Get LTS and EIS data from ERA5 (use the full time series)
+era5_lts = era5_single_level_data["LTS"]
+era5_eis = era5_single_level_data["EIS"]  # This was calculated earlier in the script
+
+time_idxs = collect(1:size(ceres_net_rad, 3))
+
+eis_ceres_grid = [era5_eis[i_ceres, j_ceres, time_idx] for (i_ceres, j_ceres) in era5_to_ceres_indices, time_idx in time_idxs]
+lts_ceres_grid = [era5_lts[i_ceres, j_ceres, time_idx] for (i_ceres, j_ceres) in era5_to_ceres_indices, time_idx in time_idxs]
+
+# Initialize correlation arrays for CERES grid
+ceres_lts_corr = cor.(eachslice(ceres_net_rad, dims=(1,2)), eachslice(lts_ceres_grid, dims=(1,2)))
+ceres_eis_corr = cor.(eachslice(ceres_net_rad, dims=(1,2)), eachslice(eis_ceres_grid, dims=(1,2)))
+
+# Create a 1x2 plot showing both correlations
+fig10, axes10 = plt.subplots(1, 2; figsize=(16, 6), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)))
+
+# Calculate common color scale for both plots
+max_abs_corr = max(maximum(abs.(filter(!isnan, ceres_lts_corr))), maximum(abs.(filter(!isnan, ceres_eis_corr))))
+colornorm_corr = colors.Normalize(vmin=-max_abs_corr, vmax=max_abs_corr)
+
+# Plot LTS correlations
+ax1 = axes10[0]
+im1 = plot_global_heatmap_on_ax!(ax1, ceres_lats, ceres_lons, ceres_lts_corr; 
+                                title="CERES Net Radiation vs LTS Correlation", 
+                                colornorm=colornorm_corr)
+
+# Plot EIS correlations  
+ax2 = axes10[1]
+im2 = plot_global_heatmap_on_ax!(ax2, ceres_lats, ceres_lons, ceres_eis_corr; 
+                                title="CERES Net Radiation vs EIS Correlation", 
+                                colornorm=colornorm_corr)
+
+# Add single colorbar
+cbar10 = fig10.colorbar(cm.ScalarMappable(norm=colornorm_corr, cmap=cmr.prinsenvlag.reversed()), 
+                        ax=axes10, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar10.set_label("Correlation Coefficient", fontsize=12)
+
+# Add overall title
+fig10.suptitle("Pointwise Correlations: CERES Net Radiation vs Atmospheric Stability", fontsize=16, y=0.95)
+
+# Save the plot
+fig10.savefig(joinpath(visdir, "ceres_radiation_vs_lts_eis_correlations.png"), dpi=300, bbox_inches="tight")
+plt.close(fig10)
+
+println("Saved pointwise correlation plots: ceres_radiation_vs_lts_eis_correlations.png")
+
+# Print some summary statistics
+valid_lts_corrs = filter(!isnan, ceres_lts_corr)
+valid_eis_corrs = filter(!isnan, ceres_eis_corr)
+
+println("LTS correlation statistics:")
+println("  Mean: $(round(mean(valid_lts_corrs), digits=4))")
+println("  Std:  $(round(std(valid_lts_corrs), digits=4))")
+println("  Min:  $(round(minimum(valid_lts_corrs), digits=4))")
+println("  Max:  $(round(maximum(valid_lts_corrs), digits=4))")
+
+println("EIS correlation statistics:")
+println("  Mean: $(round(mean(valid_eis_corrs), digits=4))")
+println("  Std:  $(round(std(valid_eis_corrs), digits=4))")
+println("  Min:  $(round(minimum(valid_eis_corrs), digits=4))")
+println("  Max:  $(round(maximum(valid_eis_corrs), digits=4))")
+
+# Plot 11: Companion plot showing gridwise standard deviation of LTS and EIS
+println("Calculating gridwise standard deviations of LTS and EIS...")
+
+# Calculate standard deviations for each grid point
+lts_std = std.(eachslice(lts_ceres_grid, dims=(1,2)))
+eis_std = std.(eachslice(eis_ceres_grid, dims=(1,2)))
+
+# Create a 1x2 plot showing both standard deviations
+fig11, axes11 = plt.subplots(1, 2; figsize=(16, 6), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)))
+
+# Calculate separate color scales for each plot since they have different units/ranges
+lts_std_max = maximum(filter(!isnan, lts_std))
+eis_std_max = maximum(filter(!isnan, eis_std))
+colornorm_lts_std = colors.Normalize(vmin=0, vmax=lts_std_max)
+colornorm_eis_std = colors.Normalize(vmin=0, vmax=eis_std_max)
+
+# Plot LTS standard deviation
+ax1_std = axes11[0]
+im1_std = plot_global_heatmap_on_ax!(ax1_std, ceres_lats, ceres_lons, lts_std; 
+                                    title="LTS Standard Deviation", 
+                                    colornorm=colornorm_lts_std,
+                                    cmap="viridis")
+
+# Plot EIS standard deviation
+ax2_std = axes11[1]
+im2_std = plot_global_heatmap_on_ax!(ax2_std, ceres_lats, ceres_lons, eis_std; 
+                                    title="EIS Standard Deviation", 
+                                    colornorm=colornorm_eis_std,
+                                    cmap="viridis")
+
+# Add separate colorbars for each subplot
+cbar11_lts = fig11.colorbar(cm.ScalarMappable(norm=colornorm_lts_std, cmap="viridis"), 
+                           ax=ax1_std, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar11_lts.set_label("LTS Standard Deviation (K)", fontsize=12)
+
+cbar11_eis = fig11.colorbar(cm.ScalarMappable(norm=colornorm_eis_std, cmap="viridis"), 
+                           ax=ax2_std, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar11_eis.set_label("EIS Standard Deviation (K)", fontsize=12)
+
+# Add overall title
+fig11.suptitle("Gridwise Standard Deviations: Atmospheric Stability Measures", fontsize=16, y=0.95)
+
+# Save the plot
+fig11.savefig(joinpath(visdir, "lts_eis_standard_deviations.png"), dpi=300, bbox_inches="tight")
+plt.close(fig11)
+
+println("Saved standard deviation plots: lts_eis_standard_deviations.png")
+
+# Print summary statistics for standard deviations
+valid_lts_std = filter(!isnan, lts_std)
+valid_eis_std = filter(!isnan, eis_std)
+
+println("LTS standard deviation statistics:")
+println("  Mean: $(round(mean(valid_lts_std), digits=4)) K")
+println("  Std:  $(round(std(valid_lts_std), digits=4)) K")
+println("  Min:  $(round(minimum(valid_lts_std), digits=4)) K")
+println("  Max:  $(round(maximum(valid_lts_std), digits=4)) K")
+
+println("EIS standard deviation statistics:")
+println("  Mean: $(round(mean(valid_eis_std), digits=4)) K")
+println("  Std:  $(round(std(valid_eis_std), digits=4)) K")
+println("  Min:  $(round(minimum(valid_eis_std), digits=4)) K")
+println("  Max:  $(round(maximum(valid_eis_std), digits=4)) K")
+
+# Plot 12: Regression coefficients of net radiation onto LTS/EIS multiplied by their standard deviations
+println("Calculating regression coefficients of CERES net radiation regressed onto LTS/EIS...")
+
+# Calculate regression coefficients for each grid point
+lts_regression_coeff = calc_1_sigma_regression.(eachslice(lts_ceres_grid, dims=(1,2)), eachslice(ceres_net_rad, dims=(1,2)))
+eis_regression_coeff = calc_1_sigma_regression.(eachslice(eis_ceres_grid, dims=(1,2)), eachslice(ceres_net_rad, dims=(1,2)))
+
+# Multiply by standard deviations to get expected change in net radiation for 1-std change in LTS/EIS
+lts_sensitivity = lts_regression_coeff .* lts_std
+eis_sensitivity = eis_regression_coeff .* eis_std
+
+# Create a 1x2 plot showing both sensitivity patterns
+fig12, axes12 = plt.subplots(1, 2; figsize=(16, 6), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)))
+
+# Calculate common color scale for both plots to enable comparison
+max_abs_sensitivity = max(maximum(abs.(filter(!isnan, lts_sensitivity))), maximum(abs.(filter(!isnan, eis_sensitivity))))
+colornorm_sensitivity = colors.Normalize(vmin=-max_abs_sensitivity, vmax=max_abs_sensitivity)
+
+# Plot LTS sensitivity (regression coeff * std)
+ax1_sens = axes12[0]
+im1_sens = plot_global_heatmap_on_ax!(ax1_sens, ceres_lats, ceres_lons, lts_sensitivity; 
+                                     title="Net Radiation Sensitivity to LTS", 
+                                     colornorm=colornorm_sensitivity)
+
+# Plot EIS sensitivity (regression coeff * std)
+ax2_sens = axes12[1]
+im2_sens = plot_global_heatmap_on_ax!(ax2_sens, ceres_lats, ceres_lons, eis_sensitivity; 
+                                     title="Net Radiation Sensitivity to EIS", 
+                                     colornorm=colornorm_sensitivity)
+
+# Add single colorbar
+cbar12 = fig12.colorbar(cm.ScalarMappable(norm=colornorm_sensitivity, cmap=cmr.prinsenvlag.reversed()), 
+                        ax=axes12, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar12.set_label("Net Radiation Change per 1σ Stability Change (W/m²)", fontsize=12)
+
+# Add overall title
+fig12.suptitle("Net Radiation onto EIS/LTS (gridwise), W/m^2/σ", fontsize=16, y=0.95)
+
+# Save the plot
+fig12.savefig(joinpath(visdir, "net_radiation_stability_sensitivity.png"), dpi=300, bbox_inches="tight")
+plt.close(fig12)
+
+println("Saved sensitivity plots: net_radiation_stability_sensitivity.png")
+
+# Print summary statistics for sensitivity
+valid_lts_sensitivity = filter(!isnan, lts_sensitivity)
+valid_eis_sensitivity = filter(!isnan, eis_sensitivity)
+
+println("LTS sensitivity statistics (W/m² per 1σ LTS change):")
+println("  Mean: $(round(mean(valid_lts_sensitivity), digits=4)) W/m²")
+println("  Std:  $(round(std(valid_lts_sensitivity), digits=4)) W/m²")
+println("  Min:  $(round(minimum(valid_lts_sensitivity), digits=4)) W/m²")
+println("  Max:  $(round(maximum(valid_lts_sensitivity), digits=4)) W/m²")
+
+println("EIS sensitivity statistics (W/m² per 1σ EIS change):")
+println("  Mean: $(round(mean(valid_eis_sensitivity), digits=4)) W/m²")
+println("  Std:  $(round(std(valid_eis_sensitivity), digits=4)) W/m²")
+println("  Min:  $(round(minimum(valid_eis_sensitivity), digits=4)) W/m²")
+println("  Max:  $(round(maximum(valid_eis_sensitivity), digits=4)) W/m²")
+
+# Plot 13: Correlation between global net radiation and gridwise LTS/EIS
+println("Calculating correlations between global net radiation and gridwise LTS/EIS...")
+
+# Calculate correlations between global radiation and each grid point's LTS/EIS
+global_lts_corr = cor.(eachslice(lts_ceres_grid, dims=(1,2)), Ref(ceres_global_rad))
+global_eis_corr = cor.(eachslice(eis_ceres_grid, dims=(1,2)), Ref(ceres_global_rad))
+
+# Create a 1x2 plot showing both correlations
+fig13, axes13 = plt.subplots(1, 2; figsize=(16, 6), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)))
+
+# Calculate common color scale for both plots
+max_abs_global_corr = max(maximum(abs.(filter(!isnan, global_lts_corr))), maximum(abs.(filter(!isnan, global_eis_corr))))
+colornorm_global_corr = colors.Normalize(vmin=-max_abs_global_corr, vmax=max_abs_global_corr)
+
+# Plot LTS vs global radiation correlations
+ax1_global = axes13[0]
+im1_global = plot_global_heatmap_on_ax!(ax1_global, ceres_lats, ceres_lons, global_lts_corr; 
+                                       title="Local LTS vs Global Net Radiation Correlation", 
+                                       colornorm=colornorm_global_corr)
+
+# Plot EIS vs global radiation correlations
+ax2_global = axes13[1]
+im2_global = plot_global_heatmap_on_ax!(ax2_global, ceres_lats, ceres_lons, global_eis_corr; 
+                                       title="Local EIS vs Global Net Radiation Correlation", 
+                                       colornorm=colornorm_global_corr)
+
+# Add single colorbar
+cbar13 = fig13.colorbar(cm.ScalarMappable(norm=colornorm_global_corr, cmap=cmr.prinsenvlag.reversed()), 
+                        ax=axes13, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar13.set_label("Correlation Coefficient", fontsize=12)
+
+# Add overall title
+fig13.suptitle("Local Atmospheric Stability vs Global Net Radiation Correlations", fontsize=16, y=0.95)
+
+# Save the plot
+fig13.savefig(joinpath(visdir, "local_stability_vs_global_radiation_correlations.png"), dpi=300, bbox_inches="tight")
+plt.close(fig13)
+
+println("Saved local-global correlation plots: local_stability_vs_global_radiation_correlations.png")
+
+# Plot 14: Regression coefficients and sensitivity of global radiation to gridwise LTS/EIS
+println("Calculating regression of global net radiation onto gridwise LTS/EIS...")
+
+# Calculate regression coefficients of global radiation onto each grid point's LTS/EIS
+global_lts_regression = calc_1_sigma_regression.(eachslice(lts_ceres_grid, dims=(1,2)), Ref(ceres_global_rad))
+global_eis_regression = calc_1_sigma_regression.(eachslice(eis_ceres_grid, dims=(1,2)), Ref(ceres_global_rad))
+
+# Multiply by standard deviations to get sensitivity
+global_lts_sensitivity = global_lts_regression .* lts_std
+global_eis_sensitivity = global_eis_regression .* eis_std
+
+# Create a 1x2 plot showing both sensitivities
+fig14, axes14 = plt.subplots(1, 2; figsize=(16, 6), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)))
+
+# Calculate common color scale for both plots
+max_abs_global_sensitivity = max(maximum(abs.(filter(!isnan, global_lts_sensitivity))), maximum(abs.(filter(!isnan, global_eis_sensitivity))))
+colornorm_global_sensitivity = colors.Normalize(vmin=-max_abs_global_sensitivity, vmax=max_abs_global_sensitivity)
+
+# Plot LTS sensitivity to global radiation
+ax1_global_sens = axes14[0]
+im1_global_sens = plot_global_heatmap_on_ax!(ax1_global_sens, ceres_lats, ceres_lons, global_lts_sensitivity; 
+                                            title="Global Radiation Sensitivity to Local LTS", 
+                                            colornorm=colornorm_global_sensitivity)
+
+# Plot EIS sensitivity to global radiation
+ax2_global_sens = axes14[1]
+im2_global_sens = plot_global_heatmap_on_ax!(ax2_global_sens, ceres_lats, ceres_lons, global_eis_sensitivity; 
+                                            title="Global Radiation Sensitivity to Local EIS", 
+                                            colornorm=colornorm_global_sensitivity)
+
+# Add single colorbar
+cbar14 = fig14.colorbar(cm.ScalarMappable(norm=colornorm_global_sensitivity, cmap=cmr.prinsenvlag.reversed()), 
+                        ax=axes14, orientation="horizontal", pad=0.08, shrink=0.8)
+cbar14.set_label("Global Radiation Change per 1σ Local Stability Change (W/m²)", fontsize=12)
+
+# Add overall title
+fig14.suptitle("Global Net Radiation Sensitivity to Local Atmospheric Stability (β × σ)", fontsize=16, y=0.95)
+
+# Save the plot
+fig14.savefig(joinpath(visdir, "global_radiation_local_stability_sensitivity.png"), dpi=300, bbox_inches="tight")
+plt.close(fig14)
+
+println("Saved global-local sensitivity plots: global_radiation_local_stability_sensitivity.png")
+
+# Print summary statistics
+valid_global_lts_corr = filter(!isnan, global_lts_corr)
+valid_global_eis_corr = filter(!isnan, global_eis_corr)
+valid_global_lts_sensitivity = filter(!isnan, global_lts_sensitivity)
+valid_global_eis_sensitivity = filter(!isnan, global_eis_sensitivity)
+
+println("Local LTS vs Global Radiation correlation statistics:")
+println("  Mean: $(round(mean(valid_global_lts_corr), digits=4))")
+println("  Std:  $(round(std(valid_global_lts_corr), digits=4))")
+println("  Min:  $(round(minimum(valid_global_lts_corr), digits=4))")
+println("  Max:  $(round(maximum(valid_global_lts_corr), digits=4))")
+
+println("Local EIS vs Global Radiation correlation statistics:")
+println("  Mean: $(round(mean(valid_global_eis_corr), digits=4))")
+println("  Std:  $(round(std(valid_global_eis_corr), digits=4))")
+println("  Min:  $(round(minimum(valid_global_eis_corr), digits=4))")
+println("  Max:  $(round(maximum(valid_global_eis_corr), digits=4))")
+
+println("Global Radiation sensitivity to local LTS (W/m² per 1σ local LTS change):")
+println("  Mean: $(round(mean(valid_global_lts_sensitivity), digits=4)) W/m²")
+println("  Std:  $(round(std(valid_global_lts_sensitivity), digits=4)) W/m²")
+println("  Min:  $(round(minimum(valid_global_lts_sensitivity), digits=4)) W/m²")
+println("  Max:  $(round(maximum(valid_global_lts_sensitivity), digits=4)) W/m²")
+
+println("Global Radiation sensitivity to local EIS (W/m² per 1σ local EIS change):")
+println("  Mean: $(round(mean(valid_global_eis_sensitivity), digits=4)) W/m²")
+println("  Std:  $(round(std(valid_global_eis_sensitivity), digits=4)) W/m²")
+println("  Min:  $(round(minimum(valid_global_eis_sensitivity), digits=4)) W/m²")
+println("  Max:  $(round(maximum(valid_global_eis_sensitivity), digits=4)) W/m²")
+
+# Plot 15: 3x3 correlation plot showing radiation response to SEPac theta_1000 components
+# Rows: Net, SW, LW radiation
+# Columns: Full theta_1000, ENSO component, ENSO residual
+
+out_arrs_plot15 = Array{Matrix{Float64}}(undef, 3, 3)
+
+std_total_theta_1000 = std(sepac_total_theta_1000)
+std_theta_1000_enso = std(sepac_enso_component)
+std_theta_1000_non_enso = std(sepac_non_enso_component)
+
+std_net_rad_gridwise = std(ceres_gridded_rad_data[1]; dims = 3)[:, :, 1]
+std_sw_rad_gridwise = std(ceres_gridded_rad_data[2]; dims = 3)[:, :, 1]
+std_lw_rad_gridwise = std(ceres_gridded_rad_data[3]; dims = 3)[:,:,1]
+
+# Calculate correlations for Plot 15
+for (i, ceres_data) in enumerate(ceres_gridded_rad_data)
+    for (j, sepac_data) in enumerate(sepac_theta_1000_data)
+        temp_arr = cor.(eachslice(ceres_data, dims=(1,2)), Ref(sepac_data))
+
+        if j == 1
+            temp_arr .*= std_theta_1000_enso ./ std_theta_1000_non_enso
+        elseif j == 2
+            temp_arr .*= std_theta_1000_enso ./ std_theta_1000_non_enso
+        end
+
+        if i == 2
+            temp_arr .*= std_sw_rad_gridwise ./ std_net_rad_gridwise
+        elseif i == 3
+            temp_arr .*= std_lw_rad_gridwise ./ std_net_rad_gridwise
+        end
+
+        out_arrs_plot15[i, j] = temp_arr
+    end
+end
+
+
+
+# Create a 3x3 grid of subplots for Plot 15
+fig15, axes15 = plt.subplots(3, 3; figsize=(15, 12), subplot_kw=Dict("projection" => ccrs.Robinson(central_longitude=180)), layout = "compressed")
+
+# Calculate separate color scales for first two columns vs last column
+max_abs_val_plot15_cols12 = max(maximum.([(arr->abs.(arr)).(out_arrs_plot15[i, j]) for i in 1:3, j in 1:2])...)
+max_abs_val_plot15_col3 = max(maximum.((arr->abs.(arr)).(out_arrs_plot15[:, 3]))...)
+colornorm15_cols12 = colors.Normalize(vmin=-max_abs_val_plot15_cols12, vmax=max_abs_val_plot15_cols12)
+colornorm15_col3 = colors.Normalize(vmin=-max_abs_val_plot15_col3, vmax=max_abs_val_plot15_col3)
+
+for i in 1:3, j in 1:3
+    ax = axes15[i-1, j-1]
+    colornorm = j <= 2 ? colornorm15_cols12 : colornorm15_col3
+    im = plot_global_heatmap_on_ax!(ax, ceres_lats, ceres_lons, out_arrs_plot15[i, j]; 
+                                   title = "", colornorm=colornorm)
+    
+    # Add titles
+    if i == 1
+        ax.set_title(sepac_theta_1000_components[j])
+    end
+    if j == 1
+        ax.set_yticks(Float64[])
+        ax.set_ylabel(rad_titles[i])
+    end
+end
+
+# Add separate colorbars - collect axes for first two columns
+axes_cols12 = [axes15[i, j] for i in 0:2, j in 0:1]
+axes_col3 = [axes15[i, 2] for i in 0:2]
+
+cbar15_cols12 = fig15.colorbar(cm.ScalarMappable(norm=colornorm15_cols12, cmap=cmr.prinsenvlag.reversed()), ax=pylist(vec(axes_cols12)), orientation="horizontal", pad=0.08, shrink=0.8)
+cbar15_cols12.set_label("Weighted Correlation Coefficient", fontsize=12)
+
+cbar15_col3 = fig15.colorbar(cm.ScalarMappable(norm=colornorm15_col3, cmap=cmr.prinsenvlag.reversed()), ax=pylist(axes_col3), orientation="horizontal", pad=0.08, shrink=0.8)
+cbar15_col3.set_label("Correlation Coefficient", fontsize=12)
+
+# Add suptitle for Plot 15
+fig15.suptitle("Radiation Correlations with SEPac θ₁₀₀₀ Components", fontsize=16, y=0.98)
+
+fig15.savefig(joinpath(visdir, "sepac_theta_1000_radiation_correlation_patterns.png"), dpi=300)
+plt.close(fig15)

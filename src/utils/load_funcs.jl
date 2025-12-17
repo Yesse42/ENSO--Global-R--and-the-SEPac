@@ -659,3 +659,115 @@ function reconstruct_spatial_arrays(spatial_vector, variable_indices, original_s
     return reconstructed_arrays
 end
 
+"""
+    load_patrizio_sst_data(variables, time_period; data_dir="../../data/Patrizio SST Partition")
+
+Load Patrizio SST Partition data for specified variables and time period.
+
+# Arguments
+- `variables`: Vector of variable identifiers (e.g., ["SST", "T_atm", "T_ocn"])
+- `time_period`: Tuple of (start_date, end_date) as Date objects
+- `data_dir`: Directory containing Patrizio SST Partition NetCDF files
+
+# Variable mapping:
+- "SST" → loads from OAFlux_sst_monthlyanom_1980to2017.nc, variable "SST"
+- "T_atm" → loads from OAFlux_Tatm_monthlyanom_1980to2017.nc, variable "Tatm" 
+- "T_ocn" → loads from OAFlux_Tocn_monthlyanom_1980to2017.nc, variable "Tocn"
+
+# Returns
+Dictionary with requested variable names as keys and raw arrays as values.
+Arrays have dimensions (lon, lat, time).
+Also returns coordinate information (lat, lon, time).
+
+# Examples
+```julia
+# Load SST data only
+sst_data, coords = load_patrizio_sst_data(["SST"], time_period)
+
+# Load all three variables
+all_data, coords = load_patrizio_sst_data(["SST", "T_atm", "T_ocn"], time_period)
+
+# Load atmospheric and oceanic temperatures
+temp_data, coords = load_patrizio_sst_data(["T_atm", "T_ocn"], time_period)
+```
+"""
+function load_patrizio_sst_data(variables, time_period; 
+                               data_dir="/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/Patrizio SST Partition")
+    
+    # Mapping from user variable names to (filename, netcdf_variable_name)
+    variable_map = Dict(
+        "SST" => ("OAFlux_sst_monthlyanom_1980to2017.nc", "SST"),
+        "T_atm" => ("OAFlux_Tatm_monthlyanom_1980to2017.nc", "Tatm"),
+        "T_ocn" => ("OAFlux_Tocn_monthlyanom_1980to2017.nc", "Tocn")
+    )
+    
+    loaded_data = Dictionary()
+    coords = Dictionary()
+    coords_loaded = false
+    
+    for var in variables
+        if !haskey(variable_map, var)
+            @warn "Variable $var not recognized. Available variables: $(keys(variable_map))"
+            continue
+        end
+        
+        filename, nc_var_name = variable_map[var]
+        filepath = joinpath(data_dir, filename)
+        
+        if !isfile(filepath)
+            @warn "File not found: $filepath"
+            continue
+        end
+        
+        # Open dataset and load data
+        ds = Dataset(filepath, "r")
+        try
+            # Load coordinates only once (all files share same coordinate system)
+            if !coords_loaded
+                # Get time coordinates and filter by time period
+                patrizio_time = ds["time"][:]
+                isvalid_time = in_time_period.(patrizio_time, Ref(time_period))
+                filtered_time = patrizio_time[isvalid_time]
+                
+                # Load spatial coordinates
+                lat = ds["lat"][:]
+                lon = ds["lon"][:]
+                
+                # Store coordinates
+                set!(coords, "time", filtered_time)
+                set!(coords, "latitude", lat)
+                set!(coords, "longitude", lon)
+                coords_loaded = true
+            else
+                # Use existing time filtering
+                patrizio_time = ds["time"][:]
+                isvalid_time = in_time_period.(patrizio_time, Ref(time_period))
+            end
+            
+            # Load the data variable with time filtering
+            time_idxs = (:, :, isvalid_time)
+            raw_data = ds[nc_var_name][time_idxs...]
+            
+            # Handle missing values
+            if !any(ismissing(el) for el in raw_data)
+                data = Array{Float32}(raw_data)
+            else
+                @warn "Variable $var contains missing values in dataset"
+                data = raw_data
+            end
+            
+            set!(loaded_data, var, data)
+            
+        finally
+            close(ds)
+        end
+    end
+    
+    # Check if any variables were successfully loaded
+    if length(loaded_data) == 0
+        @warn "No variables were successfully loaded"
+    end
+    
+    return loaded_data, coords
+end
+

@@ -50,9 +50,6 @@ enso_data, enso_coords = load_enso_data(time_period; lags=oni_lags)
 times = enso_coords["time"]
 float_times = @. year(times) + (month(times) - 1) / 12
 month_groups = groupfind(month.(times))
-for oni_col in oni_lag_names
-    detrend_and_deseasonalize_precalculated_groups!(enso_data[oni_col], float_times, month_groups)
-end
 enso_data_block = hcat([enso_data[col] for col in oni_lag_names]...) #Block data for PLS
 
 name_of_names_arr = []
@@ -78,7 +75,7 @@ for (stacked_var_name, stacked_level_var) in zip(stacked_var_names, stacked_leve
     vertical_concat_data = cat(era5_data[sfc_name], era5_data[level_name]; dims = 3)
     #Detrend and deseasonalize the vertical_concat_data
     for slice in eachslice(vertical_concat_data, dims = (1,2,3))
-        detrend_and_deseasonalize_precalculated_groups!(slice, float_times, month_groups)
+        deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, month_groups)
     end
 
     #Now for each ONI lag calculate the correlations for each slice of this array
@@ -200,7 +197,7 @@ for var_name in single_vars_era
     
     # Detrend and deseasonalize
     for slice in eachslice(var_data, dims = (1,2))
-        detrend_and_deseasonalize_precalculated_groups!(slice, float_times, month_groups)
+        deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, month_groups)
     end
     
     # Calculate correlations for each ONI lag
@@ -288,8 +285,8 @@ for var_name in single_vars_ceres
         println("$var_name is a global time series - performing temporal analysis only")
         
         # Detrend and deseasonalize
-        detrend_and_deseasonalize_precalculated_groups!(var_data, float_times, month_groups)
-        
+        deseasonalize_and_detrend_precalculated_groups_twice!(var_data, float_times, month_groups)
+
         # Calculate correlations for each ONI lag
         lag_correlations = []
         for lag_name in oni_lag_names
@@ -327,7 +324,7 @@ for var_name in single_vars_ceres
         # Gridded data - perform spatial analysis like ERA5 variables
         # Detrend and deseasonalize
         for slice in eachslice(var_data, dims = (1,2))
-            detrend_and_deseasonalize_precalculated_groups!(slice, float_times, month_groups)
+            deseasonalize_and_detrend_precalculated_groups_twice!(slice, float_times, month_groups)
         end
         
         # Calculate correlations for each ONI lag

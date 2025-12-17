@@ -35,17 +35,24 @@ press_levels = era5_coords["pressure_level"]
 
 idx_700_hpa = findfirst(press_levels .== 700)
 
-sfc_pot_temp = pot_temp.(era5_data["t2m"], era5_data["msl"]/100)  # Convert Pa to hPa
+sfc_temp = era5_data["t2m"][:,:,:]
+sfc_pot_temp = pot_temp.(sfc_temp, era5_data["msl"]/100)  # Convert Pa to hPa
 
 pot_temp_700 = pot_temp.(era5_data["t"][:,:,idx_700_hpa, 1:end-1], 700)
 
 LTS = pot_temp_700 .- sfc_pot_temp[:,:,:]
 
+display("Calculating EIS")
+
+EIS = calculate_EIS.(sfc_temp, era5_data["t"][:,:,idx_700_hpa, 1:end-1])
+
+display("EIS calculation complete. Now loading the masks for the stratocumulus regions and generating the regional time series for all variables.")
+
 #Open the precalculated masks via jld2
 mask_file = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison/stratocumulus_region_masks.jld2"
 region_data = JLD2.load(mask_file)
 
-era5_data_dict = Dictionary(["t2m", "LTS"], [era5_data["t2m"], LTS])
+era5_data_dict = Dictionary(["t2m", "LTS", "EIS"], [era5_data["t2m"], LTS, EIS])
 
 era5_time = era5_coords["time"][1:end]
 era5_float_times = calc_float_time.(era5_time)
@@ -123,7 +130,8 @@ for region in region_names
 
         #Add a detrended and deseasonalized version of the time series
         detrend_deseason_name = Symbol(var * detrend_deseason_suffix)
-        detrend_deseasoned, _ = detrend_and_deseasonalize!(copy(mean_ts), era5_float_times, era5_months)
+        detrend_deseasoned = copy(mean_ts)
+        deseasonalize_and_detrend_twice!(detrend_deseasoned, era5_float_times, era5_months)
         era5_df[!, detrend_deseason_name] = detrend_deseasoned
 
         #Now, generate the lagged time series

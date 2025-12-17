@@ -7,6 +7,7 @@ include("../utils/plot_global.jl")
 include("../utils/load_funcs.jl")
 include("../utils/utilfuncs.jl")
 include("../utils/gridded_effects_utils.jl")
+include("../pls_regressor/pls_functions.jl")
 
 using CSV, DataFrames, Dates, Dictionaries, PythonCall
 @py import matplotlib.pyplot as plt, cartopy.crs as ccrs, matplotlib.colors as colors, cmasher as cmr
@@ -111,25 +112,8 @@ nonlocal_rad_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bound
 ceres_global_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], ceres_global_df)
 
 # Filter ENSO-removed data and convert date column
-era5_enso_removed_df[!, :date] = Date.(era5_enso_removed_df[!, :date])
-era5_enso_removed_df = filter(row -> analysis_bounds[1] <= row.date <= analysis_bounds[2], era5_enso_removed_df)
 
-# Extract theta ENSO residuals from the ENSO-removed dataframe
-theta_residual_cols = filter(name -> contains(name, "θ_1000") || contains(name, "θ_700"), names(era5_enso_removed_df))
-theta_residuals_df = era5_enso_removed_df[:, vcat([:date], Symbol.(theta_residual_cols))]
-
-# Rename theta residual columns to distinguish them as ENSO-removed
-rename_dict = Dict{Symbol, Symbol}()
-for col in theta_residual_cols
-    if contains(col, "θ_1000")
-        rename_dict[Symbol(col)] = Symbol(replace(col, "θ_1000" => "θ_1000_enso_removed"))
-    elseif contains(col, "θ_700")
-        rename_dict[Symbol(col)] = Symbol(replace(col, "θ_700" => "θ_700_enso_removed"))
-    end
-end
-rename!(theta_residuals_df, collect(pairs(rename_dict)))
-
-local_df = DataFrames.innerjoin(era5_local_df, ceres_local_df, nonlocal_rad_df, ceres_global_df, theta_residuals_df, on = :date)
+local_df = DataFrames.innerjoin(era5_local_df, ceres_local_df, nonlocal_rad_df, ceres_global_df, on = :date)
 
 # Load ENSO data (ONI 3.4) and convert to DataFrame
 all_time = analysis_bounds
@@ -145,6 +129,8 @@ end
 
 dropmissing!(enso_df)
 
+enso_X = reduce(hcat, eachcol(enso_df[:, Not(:date)]))
+
 # Join ENSO data with local data
 local_df.date = Date.(local_df.date)
 enso_df.date = Date.(enso_df.date)
@@ -153,7 +139,7 @@ local_df = DataFrames.innerjoin(local_df, enso_df, on = :date)
 lags_of_interest = [-24, -12, -6, -3, 0, 3, 6, 12, 24]
 single_level_grids = [ceres_data[var] for var in ceres_varnames]
 
-time_series_correlates = ["toa_net_all_mon", "toa_net_lw_mon", "toa_net_sw_mon", "LTS_1000", "θ_1000", "θ_700", "θ_1000_enso_removed", "θ_700_enso_removed", "oni"]
+time_series_correlates = ["toa_net_all_mon", "toa_net_lw_mon", "toa_net_sw_mon", "LTS_1000", "θ_1000", "θ_700"]
 append!(time_series_correlates, global_toa_rad_names)
 
 connected_single_level_var = []
@@ -169,6 +155,39 @@ array_of_level_data = vec([vcat([era5_data[sl_var]], vec(collect(eachslice(era5_
 append!(array_of_level_data, vec([vec(collect(eachslice(era5_data[pl_var]; dims = (3,)))) for pl_var in alone_pressure_level_var]))
 
 level_var_names = vcat(level_var_names, alone_pressure_level_var)
+
+#Now write functions to remove ENSO from the local variables via PLS
+
+function remove_enso_gridded_data!(enso_X, Y; lats = nothing, n_components = 1)
+    #First fit the model
+    original_dims = size(Y)
+    spatial_dims = 1:3
+    reshaped_Y = reshape(Y, product(original_dims[spatial_dims]), original_dims[4])
+    reshaped_Y = permutedims(reshaped_Y, (2,1)) #Now time is first dimension
+
+    #Now normalize X and Y
+    enso_X = copy(enso_X)
+    enso_X, means_X, stds_X = normalize_input!(enso_X, meanfunc, nostd)
+
+    reshaped_Y, means_Y, stds_Y = normalize_input!(reshaped_Y, meanfunc, my_std_func)
+
+    #apply the cos weighting if desired
+    root_cos_weights = nothing
+    if !isnothing(lats)
+        root_cos_weights = sqrt.(cosd.(lats'))
+        reshaped_Y .*= root_cos_weights
+    end
+    #Calculate the model and predict the ENSO component
+    pls_model = make_pls_regressor(enso_X, reshaped_Y, n_components)
+    Y_predicted = predict(pls_model, enso_X)
+    Y_deflated = reshaped_Y - Y_predicted
+
+    #undo the cosine weighting and normalization
+    if !isnothing(lats)
+        Y_deflated ./= root_cos_weights
+    end
+    Y_deflated = denormalize_output!(Y_deflated, means_Y, stds_Y)
+end
 
 # First, make maps showing the connection between the vars and the surface vars at different lags
 for var in time_series_correlates

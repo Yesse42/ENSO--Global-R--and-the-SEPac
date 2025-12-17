@@ -1,7 +1,6 @@
 """
     This script plots the climatology of cloud radiative effects averaged over the year using the CERES data, and then displays latlon polygons onto that climatology map to determine where the SEPac, NEPac, and Namibian stratocumulus decks are located.
 """
-
 using GMT, JLD2, Interpolations
 
 cd(@__DIR__)
@@ -290,6 +289,22 @@ era5_ocean_mask = era5_lsm .< 0.5  # ERA5 LSM: 0=ocean, 1=land
 println("Downscaling Masks")
 
 era5_to_ceres_indices = nearest_neighbor_interpolate_grid(era_lonlat_grid, ceres_lonlat_grid; metric_func=haversine_distance)
+
+# Save the coordinate mapping indices
+println("Saving coordinate mapping indices...")
+coord_mapping_data = Dict(
+    :era5_to_ceres_indices => era5_to_ceres_indices,
+    :ceres_to_era5_indices => ceres_to_era5_indices,
+    :era5_longitude => eralon,
+    :era5_latitude => eralat,
+    :ceres_longitude => lon,
+    :ceres_latitude => lat,
+    :description => "Nearest neighbor mapping indices between ERA5 and CERES grids"
+)
+
+coord_mapping_file = joinpath(savedir, "era5_ceres_coordinate_mapping.jld2")
+jldsave(coord_mapping_file; coord_mapping_data...)
+println("Saved coordinate mapping indices to: $coord_mapping_file")
 
 for (region_name, mask) in regional_masks
     println("Upscaling $region_name mask...")
