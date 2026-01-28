@@ -1,6 +1,9 @@
 """
-This script replicates the Wang et al. analysis comparing gridded fields
-between normal and elevated SAM years across different temporal averaging periods.
+This script calculates point-by-point correlations between SAM and gridded fields
+across different temporal averaging periods.
+
+MODIFICATION: Instead of comparing high SAM vs normal SAM years, this version
+calculates the direct correlation between SAM and each gridded field variable.
 """
 
 cd(@__DIR__)
@@ -131,89 +134,85 @@ end
 println("Annual SAM averages calculated for $(nrow(annual_sam)) years")
 
 # ============================================================================
-# IDENTIFY NORMAL AND ELEVATED SAM YEARS
-# ============================================================================
-
-println("\nIdentifying normal and elevated SAM years...")
-
-# Calculate percentiles
-sam_values = annual_sam.sam_annual
-p40 = quantile(sam_values, 0.40)
-p60 = quantile(sam_values, 0.60)
-p90 = quantile(sam_values, 0.90)
-
-println("  40th percentile: $p40")
-println("  60th percentile: $p60")
-println("  90th percentile: $p90")
-
-# Identify normal years (40th-60th percentile)
-normal_years = annual_sam.year[p40 .<= annual_sam.sam_annual .<= p60]
-println("  Normal SAM years: $normal_years")
-
-# Identify elevated years (90th percentile or above)
-elevated_years = annual_sam.year[annual_sam.sam_annual .>= p90]
-println("  Elevated SAM years: $elevated_years")
-
-# ============================================================================
-# HELPER FUNCTION FOR TEMPORAL AVERAGING
+# HELPER FUNCTION FOR CALCULATING CORRELATIONS
 # ============================================================================
 
 """
-Calculate temporal average of gridded field for specified months and years.
-Also standardizes by the climatology of those specific months.
+Calculate point-by-point correlation between gridded field and SAM values
+for specified months and years with temporal offsets.
+
+Arguments:
+- field: 3D array (lon, lat, time)
+- field_time: vector of dates for field
+- sam_years: DataFrame with 'year' and 'sam_annual' columns
+- months_range: range of months to consider (e.g., 1:4 for Jan-Apr)
+- year_offset: offset from SAM year (e.g., +1 means field in year after SAM year)
+
+Returns:
+- 2D array (lon, lat) of correlation coefficients
 """
-function calculate_temporal_average_standardized(field, time_vec, months_range, target_years)
-    # Create mask for desired months and years
-    field_years = year.(time_vec)
-    field_months = month.(time_vec)
+function calculate_sam_correlation(field, field_time, sam_years, months_range, year_offset)
+    n_lon, n_lat, n_time = size(field)
 
-    # Mask for the target years and months
-    target_mask = falses(length(time_vec))
-    for i in 1:length(time_vec)
-        if field_years[i] in target_years && field_months[i] in months_range
-            target_mask[i] = true
+    # Initialize correlation map
+    correlation_map = fill(NaN, n_lon, n_lat)
+
+    # Get field years and months
+    field_years = year.(field_time)
+    field_months = month.(field_time)
+
+    # For each grid point, calculate correlation with SAM
+    for i in 1:n_lon
+        for j in 1:n_lat
+            # Collect paired observations
+            field_values = Float64[]
+            sam_values = Float64[]
+
+            for sam_row in eachrow(sam_years)
+                sam_yr = sam_row.year
+                sam_val = sam_row.sam_annual
+
+                # Get field data for the offset year and specified months
+                field_yr = sam_yr + year_offset
+
+                # Find all time indices matching this year and months
+                time_mask = (field_years .== field_yr) .& (in.(field_months, Ref(months_range)))
+
+                if sum(time_mask) > 0
+                    # Average field values over matching time points
+                    field_slice = field[i, j, time_mask]
+
+                    # Only include if we have valid data (not all NaN)
+                    if !all(isnan.(field_slice))
+                        avg_field = mean(filter(!isnan, field_slice))
+                        push!(field_values, avg_field)
+                        push!(sam_values, sam_val)
+                    end
+                end
+            end
+
+            # Calculate correlation if we have enough data points
+            if length(field_values) >= 5  # Minimum threshold for meaningful correlation
+                # Remove any NaN pairs
+                valid_idx = .!isnan.(field_values) .& .!isnan.(sam_values)
+                if sum(valid_idx) >= 5
+                    correlation_map[i, j] = cor(field_values[valid_idx], sam_values[valid_idx])
+                end
+            end
         end
     end
 
-    if sum(target_mask) == 0
-        @warn "No data found for specified months and years"
-        return fill(NaN, size(field, 1), size(field, 2))
-    end
-
-    # Mask for ALL years but same months (for climatology)
-    climatology_mask = falses(length(time_vec))
-    for i in 1:length(time_vec)
-        if field_months[i] in months_range
-            climatology_mask[i] = true
-        end
-    end
-
-    # Calculate climatological mean and std for these months across all years
-    climatology_mean = mean(field[:, :, climatology_mask], dims=3)[:, :, 1]
-    climatology_std = std(field[:, :, climatology_mask], dims=3)[:, :, 1]
-
-    # Get the data for target years/months and standardize
-    target_data = field[:, :, target_mask]
-
-    # Standardize each time slice
-    standardized_data = similar(target_data)
-    for t in 1:size(target_data, 3)
-        standardized_data[:, :, t] = (target_data[:, :, t] .- climatology_mean) ./ climatology_std
-    end
-
-    # Average the standardized data over time
-    return mean(standardized_data, dims=3)[:, :, 1]
+    return correlation_map
 end
 
 # ============================================================================
-# CALCULATE TEMPORAL AVERAGES FOR EACH GRIDDED FIELD
+# CALCULATE CORRELATIONS FOR EACH GRIDDED FIELD
 # ============================================================================
 
-println("\nCalculating temporal averages for each gridded field...")
+println("\nCalculating SAM correlations for each gridded field...")
 
-# Initialize dictionaries to store results
-normal_averages = Dictionary{String, Array{Float64, 2}}()
-elevated_averages = Dictionary{String, Array{Float64, 2}}()
+# Initialize dictionary to store results
+correlation_maps = Dictionary{String, Array{Float64, 2}}()
 
 gridded_fields = ["SST", "MSL", "Z500"]
 field_data = [sst, msl, z500]
@@ -222,59 +221,46 @@ field_times = [sst_time, msl_time, z_time]
 for (field_name, field, field_time) in zip(gridded_fields, field_data, field_times)
     println("\n  Processing $field_name...")
 
-    # Period 1: Sep-Dec immediately preceding the year
-    println("    Period 1: Sep-Dec preceding")
-    preceding_years = [yr - 1 for yr in normal_years]
-    normal_p1 = calculate_temporal_average_standardized(field, field_time, 9:12, preceding_years)
-    set!(normal_averages, "$(field_name)_period1", normal_p1)
+    # Period 1: Sep-Dec immediately preceding the SAM year (offset = -1, but month-based)
+    println("    Period 1: Sep-Dec preceding SAM year")
+    # For Sep-Dec of year before, we need special handling
+    # We'll correlate SAM in year Y with field in Sep-Dec of year Y-1
+    corr_p1 = calculate_sam_correlation(field, field_time, annual_sam, 9:12, -1)
+    set!(correlation_maps, "$(field_name)_period1", corr_p1)
 
-    preceding_years_elevated = [yr - 1 for yr in elevated_years]
-    elevated_p1 = calculate_temporal_average_standardized(field, field_time, 9:12, preceding_years_elevated)
-    set!(elevated_averages, "$(field_name)_period1", elevated_p1)
+    # Period 2: Jan-Apr of the year immediately following SAM year
+    println("    Period 2: Jan-Apr of year after SAM year")
+    corr_p2 = calculate_sam_correlation(field, field_time, annual_sam, 1:4, +1)
+    set!(correlation_maps, "$(field_name)_period2", corr_p2)
 
-    # Period 2: Jan-Apr of the year immediately following
-    println("    Period 2: Jan-Apr of following year")
-    following_years = [yr + 1 for yr in normal_years]
-    normal_p2 = calculate_temporal_average_standardized(field, field_time, 1:4, following_years)
-    set!(normal_averages, "$(field_name)_period2", normal_p2)
-
-    following_years_elevated = [yr + 1 for yr in elevated_years]
-    elevated_p2 = calculate_temporal_average_standardized(field, field_time, 1:4, following_years_elevated)
-    set!(elevated_averages, "$(field_name)_period2", elevated_p2)
-
-    # Period 3: Jan-Apr of the year after the year immediately following
-    println("    Period 3: Jan-Apr of year+2")
-    following_years2 = [yr + 2 for yr in normal_years]
-    normal_p3 = calculate_temporal_average_standardized(field, field_time, 1:4, following_years2)
-    set!(normal_averages, "$(field_name)_period3", normal_p3)
-
-    following_years2_elevated = [yr + 2 for yr in elevated_years]
-    elevated_p3 = calculate_temporal_average_standardized(field, field_time, 1:4, following_years2_elevated)
-    set!(elevated_averages, "$(field_name)_period3", elevated_p3)
+    # Period 3: Jan-Apr of year+2 after SAM year
+    println("    Period 3: Jan-Apr of year+2 after SAM year")
+    corr_p3 = calculate_sam_correlation(field, field_time, annual_sam, 1:4, +2)
+    set!(correlation_maps, "$(field_name)_period3", corr_p3)
 end
 
 # ============================================================================
-# CREATE 3x3 PLOT: ELEVATED - NORMAL
+# CREATE 3x3 PLOT: SAM CORRELATIONS
 # ============================================================================
 
-println("\nCreating 3x3 difference plots (Elevated - Normal)...")
+println("\nCreating 3x3 correlation plots...")
 
 # Create output directory
 visdir = "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/vis/SAM/wang_replication"
 mkpath(visdir)
 
-# Set fixed colorbar limits
-cbarlim = 1.0
+# Set fixed colorbar limits for correlations
+cbarlim = 0.6
 println("  Setting colorbar limits to ... ±$cbarlim")
 common_colornorm = colors.Normalize(vmin=-cbarlim, vmax=cbarlim)
 
 # Setup figure
 fig = plt.figure(figsize=(18, 12))
 
-# Row labels for fields (now rows instead of columns)
+# Row labels for fields
 field_labels = ["SST", "MSL", "Z500"]
 
-# Column labels for periods (now columns instead of rows)
+# Column labels for periods
 period_labels = [
     "Sep-Dec (Year-1)",
     "Jan-Apr (Year+1)",
@@ -284,18 +270,16 @@ period_labels = [
 # Coordinate arrays for plotting
 coords_list = [(sst_lon, sst_lat), (msl_lon, msl_lat), (z_lon, z_lat)]
 
-# Plot each combination - FLIPPED: iterate fields in outer loop, periods in inner loop
+# Plot each combination
 plot_idx = 1
 contour_plots = []
 for (field_idx, (field_name, coords)) in enumerate(zip(gridded_fields, coords_list))
     for (period_idx, period) in enumerate(["period1", "period2", "period3"])
         println("  Plotting $field_name - $period")
 
-        # Calculate difference: elevated - normal
-        normal_key = "$(field_name)_$(period)"
-        elevated_key = "$(field_name)_$(period)"
-
-        difference = elevated_averages[elevated_key] .- normal_averages[normal_key]
+        # Get correlation map
+        corr_key = "$(field_name)_$(period)"
+        correlation = correlation_maps[corr_key]
 
         # Create subplot
         global plot_idx
@@ -303,9 +287,9 @@ for (field_idx, (field_name, coords)) in enumerate(zip(gridded_fields, coords_li
         ax.set_global()
         ax.coastlines()
 
-        # Plot difference with common colorbar limits
+        # Plot correlation with common colorbar limits
         lon_grid, lat_grid = coords
-        c = ax.contourf(lon_grid, lat_grid, difference',
+        c = ax.contourf(lon_grid, lat_grid, correlation',
                        transform=ccrs.PlateCarree(),
                        cmap=cmr.prinsenvlag.reversed(),
                        levels=21,
@@ -333,16 +317,16 @@ for (field_idx, (field_name, coords)) in enumerate(zip(gridded_fields, coords_li
 end
 
 # Add overall title
-fig.suptitle("Elevated SAM Years - Normal SAM Years\n(Gridded Field Differences)",
+fig.suptitle("Point-by-Point Correlation with SAM\n(Deseasonalized Data)",
             fontsize=16, fontweight="bold", y=0.98)
 
 # Add single colorbar for all subplots
 cbar = fig.colorbar(contour_plots[1], ax=fig.get_axes(), orientation="horizontal",
                    pad=0.05, shrink=0.6, aspect=30)
-cbar.set_label("Standardized Anomaly Difference", fontsize=12, fontweight="bold")
+cbar.set_label("Correlation Coefficient", fontsize=12, fontweight="bold")
 
 # Save figure
-output_path = joinpath(visdir, "sam_elevated_minus_normal_3x3.png")
+output_path = joinpath(visdir, "sam_correlation_3x3.png")
 fig.savefig(output_path, dpi=300, bbox_inches="tight")
 println("\nSaved plot to: $output_path")
 plt.close(fig)

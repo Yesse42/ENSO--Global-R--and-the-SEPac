@@ -1,6 +1,8 @@
 """
 This script replicates the Wang et al. analysis comparing gridded fields
 between normal and elevated SAM years across different temporal averaging periods.
+
+MODIFICATION: This version applies BOTH deseasonalizing AND detrending to the data.
 """
 
 cd(@__DIR__)
@@ -75,35 +77,40 @@ println("  MSL: ", size(msl))
 println("  Z500: ", size(z500))
 
 # ============================================================================
-# DESEASONALIZE GRIDDED FIELDS
+# DESEASONALIZE AND DETREND GRIDDED FIELDS
 # ============================================================================
 
-println("\nDeseasonalizing gridded fields...")
+println("\nDeseasonalizing and detrending gridded fields...")
 
-# Get month information for each field
+# Get month information and float times for each field
 sst_months = month.(sst_time)
+sst_float_times = calc_float_time.(sst_time)
+
 msl_months = month.(msl_time)
+msl_float_times = calc_float_time.(msl_time)
+
 z_months = month.(z_time)
+z_float_times = calc_float_time.(z_time)
 
 # Process SST
-println("  Deseasonalizing SST...")
+println("  Deseasonalizing and detrending SST...")
 for slice in eachslice(sst; dims = (1,2))
-    deseasonalize!(slice, sst_months)
+    deseasonalize_and_detrend!(slice, sst_float_times, sst_months)
 end
 
 # Process MSL
-println("  Deseasonalizing MSL...")
+println("  Deseasonalizing and detrending MSL...")
 for slice in eachslice(msl; dims = (1,2))
-    deseasonalize!(slice, msl_months)
+    deseasonalize_and_detrend!(slice, msl_float_times, msl_months)
 end
 
 # Process Z500
-println("  Deseasonalizing Z500...")
+println("  Deseasonalizing and detrending Z500...")
 for slice in eachslice(z500; dims = (1,2))
-    deseasonalize!(slice, z_months)
+    deseasonalize_and_detrend!(slice, z_float_times, z_months)
 end
 
-println("  Deseasonalization complete!")
+println("  Deseasonalization and detrending complete!")
 
 # ============================================================================
 # CALCULATE ANNUAL SAM AVERAGES
@@ -333,7 +340,7 @@ for (field_idx, (field_name, coords)) in enumerate(zip(gridded_fields, coords_li
 end
 
 # Add overall title
-fig.suptitle("Elevated SAM Years - Normal SAM Years\n(Gridded Field Differences)",
+fig.suptitle("Elevated SAM Years - Normal SAM Years\n(Deseasonalized & Detrended)",
             fontsize=16, fontweight="bold", y=0.98)
 
 # Add single colorbar for all subplots
@@ -342,7 +349,7 @@ cbar = fig.colorbar(contour_plots[1], ax=fig.get_axes(), orientation="horizontal
 cbar.set_label("Standardized Anomaly Difference", fontsize=12, fontweight="bold")
 
 # Save figure
-output_path = joinpath(visdir, "sam_elevated_minus_normal_3x3.png")
+output_path = joinpath(visdir, "sam_elevated_minus_normal_3x3_deseasonalized_detrended.png")
 fig.savefig(output_path, dpi=300, bbox_inches="tight")
 println("\nSaved plot to: $output_path")
 plt.close(fig)
