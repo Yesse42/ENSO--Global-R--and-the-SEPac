@@ -13,6 +13,8 @@ struct PLSRegressor{TX, TY, TXW, TYW, TXS, TYS, TXL, TYL, TXM, TYM, TXSD, TYSD}
     Y_means::TYM
     X_stds::TXSD
     Y_stds::TYSD
+    already_centered::Bool
+    normalize::Bool
 end
 
 "Contains the results of a PLS regression without storing the original data."

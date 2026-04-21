@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(julia:*)",
+      "WebSearch",
+      "Read(//Users/C837213770/Desktop/CSU HW/ATS 655/SST_SAT_Data/**)",
+      "Bash(~/miniconda3/bin/python -c \"from sklearn.linear_model import RidgeCV; print\\('sklearn ok'\\); import numpy; print\\('numpy ok'\\)\")",
+      "Bash(~/miniconda3/bin/python3 -c \"import sklearn; print\\(sklearn.__version__\\)\")",
+      "Bash(~/miniconda3/bin/python3 -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(sw_vers)"
+    ],
+    "additionalDirectories": [
+      "/Users/C837213770/Desktop/CSU HW/ATS 655/SST_SAT_Data"
+    ]
+  }
+}

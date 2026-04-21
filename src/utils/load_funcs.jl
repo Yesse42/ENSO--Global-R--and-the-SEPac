@@ -2,6 +2,14 @@
 
 using NCDatasets, Dates, CSV, DataFrames, Dictionaries
 
+# Include time utilities (for time_lag used in load_roni).
+# Save/restore pwd() so callers' working directory is unaffected.
+let _load_funcs_orig_dir = pwd()
+    cd(@__DIR__)
+    include("time_utils.jl")
+    cd(_load_funcs_orig_dir)
+end
+
 # Helper function to find a variable in multiple datasets
 function load_era5_variable(varname, idx_tuple, datasets; throw_error_on_missing = true)
     for ds in datasets
@@ -485,6 +493,65 @@ function load_eli_data(time_period;
 end
 
 """
+    load_roni(time_period; data_dir="../../data/ENSO", filename="roni.csv",
+              lags=-24:24, allow_missing=false)
+
+Load the RONI (Relative ONI) index for a given time period and build lag columns
+using `time_lag`.  The raw sentinel missing value is -9999.
+
+Lags are computed on the full series before filtering so that edge lags can draw
+on data outside the requested period.  With `allow_missing=false` (default), lag
+entries that fall outside the record are dropped by returning only the rows where
+every lag column is non-missing.  With `allow_missing=true`, those entries are
+kept as `missing`.
+
+# Returns
+- `Dictionary` mapping `"roni_lag_N"` keys to lag vectors
+- `coords` Dictionary with `"time"` key (DateTime, mid-month +14 day offset)
+"""
+function load_roni(time_period;
+                   data_dir="../../data/ENSO",
+                   filename="roni.csv",
+                   lags=-24:24,
+                   allow_missing=false)
+    roni_path = joinpath(data_dir, filename)
+    !isfile(roni_path) && error("RONI file not found: $roni_path")
+
+    df = CSV.read(roni_path, DataFrame)
+
+    # Column 1: date strings "YYYY-MM-DD"; column 2: RONI values (-9999 = missing)
+    all_dates = Date.(df[!, 1])
+    all_vals  = Union{Float64, Missing}[v <= -9998.0 ? missing : Float64(v)
+                                        for v in df[!, 2]]
+
+    # Compute lags on the full series so edge values can reach outside time_period
+    lag_vectors = Dict(lag => time_lag(all_vals, lag) for lag in lags)
+
+    # Filter to the requested time period
+    valid          = in_time_period.(all_dates, Ref(time_period))
+    filtered_dates = all_dates[valid]
+    filtered_lags  = Dict(lag => lag_vectors[lag][valid] for lag in lags)
+
+    # Optionally drop time steps where any lag is missing
+    keep = if allow_missing
+        trues(length(filtered_dates))
+    else
+        n = length(filtered_dates)
+        [all(!ismissing, [filtered_lags[lag][i] for lag in lags]) for i in 1:n]
+    end
+
+    loaded_data = Dictionary()
+    for lag in lags
+        set!(loaded_data, "roni_lag_$lag", filtered_lags[lag][keep])
+    end
+
+    coords = Dictionary()
+    set!(coords, "time", DateTime.(filtered_dates[keep]) .+ Day(14))
+
+    return loaded_data, coords
+end
+
+"""
     reshape_and_concatenate(arrays, array_names, time_indices)
 
 Reshape arrays to (time, other_dims) and concatenate along the second dimension.
@@ -523,7 +590,7 @@ function reshape_and_concatenate(arrays, array_names, time_indices)
     
     current_col = 1
     
-    for (i, (arr, name, time_idx)) in enumerate(zip(arrays, array_names, time_indices))
+    for (arr, name, time_idx) in zip(arrays, array_names, time_indices)
         # Store original shape
         orig_shape = size(arr)
         set!(original_shapes, name, orig_shape)

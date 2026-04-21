@@ -21,7 +21,7 @@ include("../utils/constants.jl")
 include("../utils/utilfuncs.jl")
 include("../utils/plot_global.jl")
 
-lonbounds = (140, -75+360)
+lonbounds = (120, -70+360)
 latbounds = (-5, 5)
 times = (Date(0), Date(10000000))
 

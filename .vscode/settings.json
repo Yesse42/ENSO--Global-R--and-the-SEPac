@@ -1,3 +1,5 @@
 {
-    "julia.environmentPath": "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac"
+    "julia.environmentPath": "/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda"
 }

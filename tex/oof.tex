@@ -1,0 +1,78 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{siunitx}
+\usepackage{mathtools}
+
+\title{Understanding the physical processes that drive the observed pattern effect}
+\author{Robinett / Thompson}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Let $N$ denote earth's top of atmosphere (TOA) net radiation, with all radiative variables positive downwards, and set
+
+\begin{equation}
+    N = F + R = F + \Lambda T
+\end{equation}
+
+where $F$ is an imposed radiative forcing, $R$ is the radiative response of the earth system to that forcing, and the equilibrium climate feedback parameter $\Lambda$ gives the change in net radiative balance for each degree of warming in response to a constant forcing, after the climate system has been allowed to equilibrate. Following GREG2004, the linearized equilibrium climate feedback parameter of a climate model with constant forcing $F$ can also be calculated via linear regression as
+
+\begin{equation}
+    \Lambda = \frac{\overline{T'R'}}{\overline{T'^2}}
+\end{equation}
+
+where multiple observations of the perturbations $T'$ of global mean temperature and $R'$ of global net radiation are taken as the model equilibrates. The effective climate feedback parameter $\lambda_{eff}$ is an analogous parameter calculated in the same manner, but using observations of the perturbations of $R = N-F$ and $T$ instead. Note that in our analysis we implicitly assume that F is a linear function of time, such that by detrending $N$ we remove $F$ from the time series.
+
+Both modeling studies e.g. Greens Function experiments as well as observational datasets indicate  strong relationships between Southeast Pacific (SEPac) surface temperature and global radiation. We seek to determine whether this relationship is part of a feedback with a physical mechanism, and along the way we hope to uncover why this feedback occurs only in the SEPac and not in other stratocumulus regions, and hope to relate our work to the broader literature on the pattern effect.
+
+\section{Data}
+
+We used temperature data from the ERA5 reanalysis on both monthly and 6-hour resolutions, which we then downsampled to daily resolution. For our radiation data, we use monthly CERES EBAF TOA radiation data and daily CERES SYN1 radiation data. The seasonal cycle has been removed from all data, which is then detrended, as we are interested in inter-/intrannual variability as opposed to the relationship between trends. To calculate the ENSO component of any given field or time series, we fit a 1 component partial least squares (PLS) model of ENSO lags from -6 months to 6 months predicting the variable; the prediction is then the ENSO component and the residual is the Non-ENSO component. The advantage of PLS is that it automatically incorporates the information from all lags.
+
+\section{Methods}
+
+\subsection{Decomposing the climate feedback parameter and the Southeast Pacific's Contribution}
+    Let $T$ denote global mean temperature, $T_{L}$ denote temperatures over the Southeast Pacific (SEPac), $T_R$ denote temperature averaged over the remainder of the globe, $R$ denote the top of atmosphere radiative imbalance, and $R_i$ denote the TOA local radiative balance at each spatial location in a given dataset. Note that $R = \sum R_i w_i$ where $w_i$ is the area fraction associated with each location. Let $f_L$ and $f_R$ denote the area fraction of the SEPac and the rest of the globe, respectively.
+    
+    Thus, the global climate feedback parameter (calculated as in GREG2004) can be decomposed as such:
+
+\begin{equation}
+ \label{eq:first_decomp}
+ \lambda_{eff} = \overline{T'R'}/\overline{T'^2} = f_L \frac{\overline{T_L R}}{\overline{T'^2}} + f_R \frac{\overline{T_R R}}{\overline{T'^2}}
+\end{equation}
+
+where overbars denote the covariance and apostrophes denote deviations from a reference state. The first term of the RHS of \ref{eq:first_decomp} can be viewed as the contribution of variations in SEPac temperature to global radiation ($\approx \qty{+0.1}{W/m^2}$ in the observational record), with the second term giving the residual ($\approx \qty{-1.2}{W/m^2}$). Importantly, in the observational record the SEPac seems to have a positive (destabilizing) climate feedback which works to counteract the negative global feedback. As the SEPac is a stratocumulus region, a reasonable hypothesis is that this is due to local cloud feedbacks. However, as shown in figure \ref{fig:local_nonlocal_table} approximately 2/3 of the positive correlation is due to remote radiative effects associated with SEPac $T_L$. Additionally, this remote effect is not due to ENSO, even though ENSO does have a lagged relationship with global radiation.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figures/L_decomposition_5panel_table.png}
+    \caption{Decomposition of the SEPac $f_L \frac{\overline{T_L R}}{\overline{T'^2}}$ term into local, nonlocal, shortwave, longwave, clear, and cloudy sky components for both the total radiation components as well as the ENSO components -- E subscripts -- and the ENSO residual components with NE subscripts. The sum of the ENSO and ENSO resisudal tables as well as the cross terms yields the corresponding entry in the total table. Additivity of the shortwave and longwave/clear and cloudy sky components only holds in the Total table. Note the large contribution of nonlocal radiation to the magnitude of the SEPac's effect.}
+    \label{fig:local_nonlocal_table}
+\end{figure}
+
+
+To determine whether these remote variations in radiation are due to remote temperatures covarying with SEPac temperature, we perform a further decomposition:
+
+\begin{align}
+    \label{eq:sepac_decomp}
+    \lambda_{eff\_SEPac}
+    &= f_L \frac{\overline{T_L \sum R_i w_i}}{\overline{T'^2}} \\
+    &= \frac{f_L}{\overline{T'^2}} \overline{T_L \sum w_i (\alpha_i (\beta_i T_L +T_{i_{res}}) + R_{i_{res}})} \\
+    &= \frac{f_L}{\overline{T'^2}} \overline{T_L \sum w_i (\alpha_i (\beta_i T_L) + R_{i_{res}})}
+\end{align}
+
+where $R_i$ is decomposed by linear regression onto $T_i$ as $R_i = \alpha T_i + R_{i_{res}}$ and then $T_i$ is further decomposed as $T_i = \beta_i T_L + T_{i_{res}}$. Note we can drop the $T_{i_{res}}$ term in the last expression as it is uncorrelated with $T_L$. The first term in this decomposition gives the effect of SEPac $T_L$ on remote radiation mediated via its relationship with remote temperatures, while the second term gives the residual relationship between SEPac $T_L$ and remote radiation mediated by other mechanisms.
+
+The results of this decomposition are show
+
+\begin{figure}
+    \label{fig:remote_temp_decomp}
+    \centering
+    \includegraphics[width=\linewidth]{figures/L_gridpoint_temp_decomp_10pane.png}
+\end{figure}
+
+
+\end{document}

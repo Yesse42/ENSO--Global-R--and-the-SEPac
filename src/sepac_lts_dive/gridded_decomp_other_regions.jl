@@ -700,6 +700,9 @@ function perform_regional_decomposition(region::String; analysis_bounds = (Date(
     in_stratocum_corr_thresh = cos_weighted_corr .< 0
     in_stratocum_region = in_stratocum_dist .& in_stratocum_corr_thresh .& lsm_ceres_grid
 
+    # Store the stratocumulus exclusion mask in results
+    results["in_stratocum_region"] = in_stratocum_region
+
     #Sum the correlation for the stratocumulus region
     stratocum_region_sum = sum(cos_weighted_corr[in_stratocum_region .== true])
 
@@ -913,6 +916,11 @@ function run_all_regional_analyses()
         all_results[region] = results        
     end
     
+    # Save stratocumulus exclusion masks to JLD2
+    stratocum_masks = Dict(region => all_results[region]["in_stratocum_region"] for region in keys(all_results) if haskey(all_results[region], "in_stratocum_region"))
+    jldsave("/Users/C837213770/Desktop/Research Code/ENSO, Global R, and the SEPac/data/stratocum_comparison/stratocumulus_exclusion_masks.jld2"; stratocum_masks)
+    println("Saved stratocumulus exclusion masks for $(length(stratocum_masks)) regions.")
+
     # Create summary comparison plot
     create_regional_comparison_summary(all_results)
     
